@@ -1,0 +1,586 @@
+package logx
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// ---------------------------------------------------------------------------
+// FileAppender — 文件输出器
+// ---------------------------------------------------------------------------
+
+// fileAppender 实现了 Appender 接口，支持同步/异步双引擎写入、
+// 基于文件大小和自然天的日志轮转、以及软链接自动维护。
+//
+// 物理文件命名：<basename>-2006-01-02T15-04-05.000.log
+// 软链接：       <basename>.log → 最新物理文件
+type fileAppender struct {
+	cfg FileConfig
+
+	mu          sync.Mutex
+	file        *os.File
+	currentSize int64
+	rotateAt    time.Time // 下一次自然天轮转时间
+
+	dir           string // 绝对路径的日志目录
+	basenameNoExt string // 不带后缀的基础名
+	ext           string // 文件后缀（含点）
+	symlinkPath   string // 软链接完整路径
+
+	// 异步模式专属字段
+	ch     chan []byte // 环形缓冲通道
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	closeOnce sync.Once
+	closed    int32 // atomic: 0=open, 1=closed
+}
+
+// newFileAppender 创建一个新的文件输出器。
+// cfg 必须至少设置 LogDir 和 Filename。
+func newFileAppender(cfg *FileConfig) (Appender, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("logx：FileConfig 不能为 nil")
+	}
+	if cfg.LogDir == "" {
+		return nil, fmt.Errorf("logx：日志目录不能为空")
+	}
+	if cfg.Filename == "" {
+		return nil, fmt.Errorf("logx：日志文件名不能为空")
+	}
+	if cfg.MaxSize <= 0 {
+		cfg.MaxSize = 100
+	}
+	if cfg.BufferSize <= 0 {
+		cfg.BufferSize = 4096
+	}
+	if cfg.FlushInterval <= 0 {
+		cfg.FlushInterval = time.Second
+	}
+	if cfg.MaxAge <= 0 {
+		cfg.MaxAge = 180
+	}
+	if cfg.MaxBackups <= 0 {
+		cfg.MaxBackups = 100
+	}
+
+	// 确保目录存在
+	absDir, err := filepath.Abs(cfg.LogDir)
+	if err != nil {
+		return nil, fmt.Errorf("logx：解析日志目录路径失败：%w", err)
+	}
+	if err := os.MkdirAll(absDir, 0755); err != nil {
+		return nil, fmt.Errorf("logx：日志目录创建失败：%w", err)
+	}
+
+	// 分离文件名和后缀
+	ext := filepath.Ext(cfg.Filename)
+	basenameNoExt := strings.TrimSuffix(cfg.Filename, ext)
+	if ext == "" {
+		ext = ".log"
+	}
+
+	fa := &fileAppender{
+		cfg:           *cfg,
+		dir:           absDir,
+		basenameNoExt: basenameNoExt,
+		ext:           ext,
+		symlinkPath:   filepath.Join(absDir, cfg.Filename),
+	}
+
+	// 打开初始物理文件
+	if err := fa.openNewFile(); err != nil {
+		return nil, fmt.Errorf("logx：创建日志文件失败：%w", err)
+	}
+
+	// 创建统一的 context 用于控制所有后台协程
+	fa.ctx, fa.cancel = context.WithCancel(context.Background())
+
+	// 异步模式：启动后台刷盘协程
+	if fa.cfg.WriteMode == AsyncWriteMode {
+		fa.ch = make(chan []byte, fa.cfg.BufferSize)
+		fa.wg.Add(1)
+		go fa.runFlushLoop()
+	}
+
+	// 启动后台生命周期管理
+	fa.wg.Add(1)
+	go fa.runLifecycle()
+
+	return fa, nil
+}
+
+// ---------------------------------------------------------------------------
+// Appender 接口实现
+// ---------------------------------------------------------------------------
+
+// Append 写入日志数据。
+func (fa *fileAppender) Append(level Level, p []byte) (n int, err error) {
+	if atomic.LoadInt32(&fa.closed) == 1 {
+		return 0, fmt.Errorf("logx：文件输出器已关闭")
+	}
+
+	if fa.cfg.WriteMode == AsyncWriteMode {
+		return fa.appendAsync(p)
+	}
+	return fa.appendSync(p)
+}
+
+// Sync 强制同步刷盘。
+func (fa *fileAppender) Sync() error {
+	if fa.cfg.WriteMode == AsyncWriteMode {
+		// 异步模式：Sync 将通道中所有积压数据刷入磁盘
+		return fa.syncAsync()
+	}
+
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+	if fa.file != nil {
+		return fa.file.Sync()
+	}
+	return nil
+}
+
+// Close 关闭输出器，释放资源。
+func (fa *fileAppender) Close() error {
+	var err error
+	fa.closeOnce.Do(func() {
+		atomic.StoreInt32(&fa.closed, 1)
+
+		// 取消所有后台协程
+		fa.cancel()
+
+		// 排空异步通道中残留的日志
+		if fa.cfg.WriteMode == AsyncWriteMode {
+			fa.drainAsync()
+		}
+
+		// 等待所有后台协程退出
+		fa.wg.Wait()
+
+		fa.mu.Lock()
+		defer fa.mu.Unlock()
+		if fa.file != nil {
+			if syncErr := fa.file.Sync(); syncErr != nil && err == nil {
+				err = syncErr
+			}
+			if closeErr := fa.file.Close(); closeErr != nil && err == nil {
+				err = closeErr
+			}
+			fa.file = nil
+		}
+	})
+	return err
+}
+
+// ---------------------------------------------------------------------------
+// 同步写入
+// ---------------------------------------------------------------------------
+
+func (fa *fileAppender) appendSync(p []byte) (int, error) {
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+
+	if err := fa.checkRotation(len(p)); err != nil {
+		return 0, err
+	}
+
+	n, err := fa.file.Write(p)
+	if err == nil {
+		fa.currentSize += int64(n)
+	}
+	return n, err
+}
+
+// ---------------------------------------------------------------------------
+// 异步写入
+// ---------------------------------------------------------------------------
+
+func (fa *fileAppender) appendAsync(p []byte) (int, error) {
+	// 拷贝数据（调用方可能复用缓冲区）
+	data := make([]byte, len(p))
+	copy(data, p)
+
+	select {
+	case fa.ch <- data:
+		return len(p), nil
+	default:
+		// 通道满，丢弃此条日志（异步模式的权衡）
+		return 0, nil
+	}
+}
+
+// runFlushLoop 后台批量刷盘协程。
+func (fa *fileAppender) runFlushLoop() {
+	defer fa.wg.Done()
+
+	var buf bytes.Buffer
+	ticker := time.NewTicker(fa.cfg.FlushInterval)
+	defer ticker.Stop()
+
+	flush := func() {
+		if buf.Len() == 0 {
+			return
+		}
+		data := make([]byte, buf.Len())
+		copy(data, buf.Bytes())
+		buf.Reset()
+
+		fa.mu.Lock()
+		if err := fa.checkRotation(len(data)); err != nil {
+			fmt.Fprintf(os.Stderr, "logx：异步刷盘轮转失败：%v\n", err)
+			fa.mu.Unlock()
+			return
+		}
+		n, err := fa.file.Write(data)
+		if err == nil {
+			fa.currentSize += int64(n)
+		} else {
+			fmt.Fprintf(os.Stderr, "logx：异步刷盘写入失败：%v\n", err)
+		}
+		fa.mu.Unlock()
+	}
+
+	for {
+		select {
+		case <-fa.ctx.Done():
+			// 退出前排空通道
+			for {
+				select {
+				case data := <-fa.ch:
+					buf.Write(data)
+				default:
+					flush()
+					return
+				}
+			}
+
+		case data := <-fa.ch:
+			buf.Write(data)
+			// 达到批量大小阈值时立即刷盘
+			if buf.Len() >= 64*1024 { // 64KB 批量阈值
+				flush()
+			}
+
+		case <-ticker.C:
+			flush()
+		}
+	}
+}
+
+// drainAsync 排空通道中所有残留数据。
+func (fa *fileAppender) drainAsync() {
+	for {
+		select {
+		case data := <-fa.ch:
+			fa.mu.Lock()
+			if err := fa.checkRotation(len(data)); err != nil {
+				fmt.Fprintf(os.Stderr, "logx：关闭排空轮转失败：%v\n", err)
+				fa.mu.Unlock()
+				continue
+			}
+			n, err := fa.file.Write(data)
+			if err == nil {
+				fa.currentSize += int64(n)
+			}
+			fa.mu.Unlock()
+		default:
+			return
+		}
+	}
+}
+
+// syncAsync 将异步通道中的积压数据强制刷盘。
+func (fa *fileAppender) syncAsync() error {
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+
+	// 排空通道
+	for {
+		select {
+		case data := <-fa.ch:
+			if err := fa.checkRotation(len(data)); err != nil {
+				return err
+			}
+			if _, err := fa.file.Write(data); err != nil {
+				return err
+			}
+		default:
+			if fa.file != nil {
+				return fa.file.Sync()
+			}
+			return nil
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 文件管理与轮转
+// ---------------------------------------------------------------------------
+
+// physicalName 根据时间戳生成物理文件名。
+func (fa *fileAppender) physicalName(t time.Time) string {
+	ts := t.Format("2006-01-02T15-04-05.000")
+	return fmt.Sprintf("%s-%s%s", fa.basenameNoExt, ts, fa.ext)
+}
+
+// openNewFile 创建新的物理日志文件并更新软链接。
+func (fa *fileAppender) openNewFile() error {
+	now := time.Now()
+	physicalPath := filepath.Join(fa.dir, fa.physicalName(now))
+
+	f, err := os.OpenFile(physicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("logx：无法创建物理日志文件 %s：%w", physicalPath, err)
+	}
+
+	// 关闭旧文件
+	if fa.file != nil {
+		fa.file.Close()
+	}
+
+	fa.file = f
+
+	// 获取当前文件大小
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("logx：获取文件状态失败：%w", err)
+	}
+	fa.currentSize = info.Size()
+
+	// 计算下一次自然天轮转时间
+	fa.rotateAt = nextMidnight(now)
+
+	// 更新软链接
+	fa.updateSymlink(physicalPath)
+
+	return nil
+}
+
+// checkRotation 检查是否需要轮转（容量 or 时间），必要时执行。
+// 必须在持有 mu 的情况下调用。
+func (fa *fileAppender) checkRotation(dataLen int) error {
+	needRotate := false
+
+	// 容量预判：原子边界保护 —— 若当前大小 + 新日志 > 阈值，先轮转
+	if fa.cfg.MaxSize > 0 {
+		maxBytes := int64(fa.cfg.MaxSize) * 1024 * 1024
+		if fa.currentSize+int64(dataLen) > maxBytes {
+			needRotate = true
+		}
+	}
+
+	// 自然天轮转
+	if !needRotate && time.Now().After(fa.rotateAt) {
+		needRotate = true
+	}
+
+	if needRotate {
+		return fa.openNewFile()
+	}
+
+	return nil
+}
+
+// updateSymlink 创建或更新软链接，使其指向最新的物理文件。
+func (fa *fileAppender) updateSymlink(physicalPath string) {
+	// Windows 不支持 Symlink（需要特殊权限），非 Windows 才创建
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	// 删除旧软链接
+	os.Remove(fa.symlinkPath)
+
+	// 创建新软链接
+	if err := os.Symlink(filepath.Base(physicalPath), fa.symlinkPath); err != nil {
+		fmt.Fprintf(os.Stderr, "logx：创建软链接失败：%v\n", err)
+	}
+}
+
+// nextMidnight 返回下一个午夜的 time.Time。
+func nextMidnight(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d+1, 0, 0, 0, 0, t.Location())
+}
+
+// ---------------------------------------------------------------------------
+// 生命周期管理
+// ---------------------------------------------------------------------------
+
+// runLifecycle 后台生命周期协程：定期扫描并执行清理和压缩。
+func (fa *fileAppender) runLifecycle() {
+	defer fa.wg.Done()
+
+	// 启动时立即执行一次清理
+	fa.cleanup()
+
+	ticker := time.NewTicker(10 * time.Minute) // 每 10 分钟检查一次
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-fa.ctx.Done():
+			return
+		case <-ticker.C:
+			fa.cleanup()
+		}
+	}
+}
+
+// cleanup 执行一次完整的清理周期：删除过期文件 + 压缩旧文件。
+func (fa *fileAppender) cleanup() {
+	pattern := fmt.Sprintf("%s-*%s", fa.basenameNoExt, fa.ext)
+	globPattern := filepath.Join(fa.dir, pattern)
+
+	matches, err := filepath.Glob(globPattern)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logx：扫描日志文件失败：%v\n", err)
+		return
+	}
+
+	// 按修改时间排序（旧→新）
+	sortByModTime(matches)
+
+	fa.mu.Lock()
+	currentPhysical := ""
+	if fa.file != nil {
+		currentPhysical = fa.file.Name()
+	}
+	fa.mu.Unlock()
+
+	now := time.Now()
+
+	// 第一遍：按 MaxAge 删除
+	if fa.cfg.MaxAge > 0 {
+		cutoff := now.AddDate(0, 0, -fa.cfg.MaxAge)
+		for _, path := range matches {
+			if path == currentPhysical {
+				continue // 不删除当前文件
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				os.Remove(path)
+			}
+		}
+	}
+
+	// 重新扫描（部分文件已被删除）
+	matches, _ = filepath.Glob(globPattern)
+	sortByModTime(matches)
+
+	// 第二遍：按 MaxBackups 删除（保留最新的 N 个）
+	if fa.cfg.MaxBackups > 0 && len(matches) > fa.cfg.MaxBackups {
+		toDelete := len(matches) - fa.cfg.MaxBackups
+		deleted := 0
+		for _, path := range matches {
+			if path == currentPhysical {
+				continue
+			}
+			if deleted >= toDelete {
+				break
+			}
+			os.Remove(path)
+			deleted++
+		}
+	}
+
+	// 第三遍：压缩超过 CompressAfter 天的文件
+	if fa.cfg.CompressAfter > 0 {
+		compressCutoff := now.AddDate(0, 0, -fa.cfg.CompressAfter)
+		matches, _ = filepath.Glob(globPattern)
+		for _, path := range matches {
+			if path == currentPhysical {
+				continue
+			}
+			if strings.HasSuffix(path, ".gz") {
+				continue
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				continue
+			}
+			if !info.ModTime().After(compressCutoff) {
+				fa.compressFile(path)
+			}
+		}
+	}
+}
+
+// compressFile 将指定文件压缩为 .gz 格式，压缩成功后将原文件删除。
+func (fa *fileAppender) compressFile(path string) {
+	gzPath := path + ".gz"
+
+	// 打开源文件
+	src, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logx：压缩-打开源文件失败 %s：%v\n", path, err)
+		return
+	}
+	defer src.Close()
+
+	// 创建目标 .gz 文件
+	dst, err := os.Create(gzPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logx：压缩-创建目标文件失败 %s：%v\n", gzPath, err)
+		return
+	}
+
+	gw := gzip.NewWriter(dst)
+	if _, err := io.Copy(gw, src); err != nil {
+		gw.Close()
+		dst.Close()
+		os.Remove(gzPath)
+		fmt.Fprintf(os.Stderr, "logx：压缩-写入失败 %s：%v\n", path, err)
+		return
+	}
+
+	if err := gw.Close(); err != nil {
+		dst.Close()
+		os.Remove(gzPath)
+		fmt.Fprintf(os.Stderr, "logx：压缩-关闭gzip失败 %s：%v\n", path, err)
+		return
+	}
+	if err := dst.Close(); err != nil {
+		os.Remove(gzPath)
+		fmt.Fprintf(os.Stderr, "logx：压缩-关闭文件失败 %s：%v\n", path, err)
+		return
+	}
+
+	// 压缩成功后删除原文件
+	os.Remove(path)
+}
+
+// ---------------------------------------------------------------------------
+// 工具函数
+// ---------------------------------------------------------------------------
+
+// sortByModTime 按文件修改时间升序排列（最旧的在前）。
+func sortByModTime(paths []string) {
+	for i := 0; i < len(paths); i++ {
+		for j := i + 1; j < len(paths); j++ {
+			infoI, errI := os.Stat(paths[i])
+			infoJ, errJ := os.Stat(paths[j])
+			if errI != nil || errJ != nil {
+				continue
+			}
+			if infoJ.ModTime().Before(infoI.ModTime()) {
+				paths[i], paths[j] = paths[j], paths[i]
+			}
+		}
+	}
+}

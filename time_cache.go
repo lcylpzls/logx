@@ -47,22 +47,22 @@ const timeLayout = "2006-01-02 15:04:05.000"
 // formatTimeBytes 手动格式化时间为 []byte，避免 time.Format 的内存分配。
 // 输出格式："2006-01-02 15:04:05.000"（23 字节）。
 func formatTimeBytes(t time.Time) []byte {
-	y, m, d := t.Date()
-	h, min, s := t.Clock()
+	year, month, day := t.Date()
+	hour, minute, second := t.Clock()
 	ms := t.Nanosecond() / 1e6
 
 	buf := make([]byte, 0, 23)
-	buf = appendInt4(buf, y)
+	buf = appendInt4(buf, year)
 	buf = append(buf, '-')
-	buf = appendInt2(buf, int(m))
+	buf = appendInt2(buf, int(month))
 	buf = append(buf, '-')
-	buf = appendInt2(buf, d)
+	buf = appendInt2(buf, day)
 	buf = append(buf, ' ')
-	buf = appendInt2(buf, h)
+	buf = appendInt2(buf, hour)
 	buf = append(buf, ':')
-	buf = appendInt2(buf, min)
+	buf = appendInt2(buf, minute)
 	buf = append(buf, ':')
-	buf = appendInt2(buf, s)
+	buf = appendInt2(buf, second)
 	buf = append(buf, '.')
 	buf = appendInt3(buf, ms)
 	return buf

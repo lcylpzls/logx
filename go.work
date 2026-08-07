@@ -1,0 +1,12 @@
+go 1.21
+
+use (
+	.
+	./examples/advanced
+	./examples/basic
+	./examples/bench
+	./examples/bench_compare
+	./examples/file_output
+	./examples/graceful_shutdown
+	./examples/stdlog
+)

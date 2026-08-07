@@ -1,4 +1,4 @@
-module github.com/lcylpzls/logx/examples/basic
+module github.com/lcylpzls/logx/examples/graceful_shutdown
 
 go 1.21
 

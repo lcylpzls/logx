@@ -45,7 +45,23 @@ type fileAppender struct {
 
 	closeOnce sync.Once
 	closed    int32 // atomic: 0=open, 1=closed
+
+	errorHandler func(error) // 内部错误统一出口，nil 时降级为 stderr
+
+	// 运行指标（原子计数）
+	written      atomic.Uint64 // 成功写入的日志条数
+	writeBytes   atomic.Uint64 // 成功写入的字节数
+	dropped      atomic.Uint64 // 异步模式被丢弃的日志条数
+	rotations    atomic.Uint64 // 文件轮转次数
+	compressions atomic.Uint64 // gzip 压缩成功次数
+	cleanups     atomic.Uint64 // 生命周期清理执行次数
 }
+
+// lifecycleCheckInterval 生命周期后台扫描间隔（测试注入用）。
+var lifecycleCheckInterval = 10 * time.Minute
+
+// platformIsWindows 平台判断（测试注入用，生产行为不变）。
+var platformIsWindows = runtime.GOOS == "windows"
 
 // newFileAppender 创建一个新的文件输出器。
 // cfg 必须至少设置 LogDir 和 Filename。
@@ -76,7 +92,7 @@ func newFileAppender(cfg *FileConfig) (Appender, error) {
 	}
 
 	// 确保目录存在
-	absDir, err := filepath.Abs(cfg.LogDir)
+	absDir, err := absPathFn(cfg.LogDir)
 	if err != nil {
 		return nil, fmt.Errorf("logx：解析日志目录路径失败：%w", err)
 	}
@@ -97,6 +113,7 @@ func newFileAppender(cfg *FileConfig) (Appender, error) {
 		basenameNoExt: basenameNoExt,
 		ext:           ext,
 		symlinkPath:   filepath.Join(absDir, cfg.Filename),
+		errorHandler:  cfg.ErrorHandler,
 	}
 
 	// 打开初始物理文件
@@ -175,7 +192,7 @@ func (fa *fileAppender) Close() error {
 			if syncErr := fa.file.Sync(); syncErr != nil && err == nil {
 				err = syncErr
 			}
-			if closeErr := fa.file.Close(); closeErr != nil && err == nil {
+			if closeErr := closeFileFn(fa.file); closeErr != nil && err == nil {
 				err = closeErr
 			}
 			fa.file = nil
@@ -199,6 +216,8 @@ func (fa *fileAppender) appendSync(p []byte) (int, error) {
 	n, err := fa.file.Write(p)
 	if err == nil {
 		fa.currentSize += int64(n)
+		fa.written.Add(1)
+		fa.writeBytes.Add(uint64(n))
 	}
 	return n, err
 }
@@ -216,7 +235,11 @@ func (fa *fileAppender) appendAsync(p []byte) (int, error) {
 	case fa.ch <- data:
 		return len(p), nil
 	default:
-		// 通道满，丢弃此条日志（异步模式的权衡）
+		// 通道满，丢弃此条日志（异步模式的权衡），并记录丢弃指标
+		fa.dropped.Add(1)
+		if fa.cfg.OnDropped != nil {
+			fa.cfg.OnDropped()
+		}
 		return 0, nil
 	}
 }
@@ -239,15 +262,17 @@ func (fa *fileAppender) runFlushLoop() {
 
 		fa.mu.Lock()
 		if err := fa.checkRotation(len(data)); err != nil {
-			fmt.Fprintf(os.Stderr, "logx：异步刷盘轮转失败：%v\n", err)
+			fa.reportError(fmt.Errorf("异步刷盘轮转失败：%w", err))
 			fa.mu.Unlock()
 			return
 		}
 		n, err := fa.file.Write(data)
 		if err == nil {
 			fa.currentSize += int64(n)
+			fa.written.Add(1)
+			fa.writeBytes.Add(uint64(n))
 		} else {
-			fmt.Fprintf(os.Stderr, "logx：异步刷盘写入失败：%v\n", err)
+			fa.reportError(fmt.Errorf("异步刷盘写入失败：%w", err))
 		}
 		fa.mu.Unlock()
 	}
@@ -256,15 +281,9 @@ func (fa *fileAppender) runFlushLoop() {
 		select {
 		case <-fa.ctx.Done():
 			// 退出前排空通道
-			for {
-				select {
-				case data := <-fa.ch:
-					buf.Write(data)
-				default:
-					flush()
-					return
-				}
-			}
+			fa.drainPending(&buf)
+			flush()
+			return
 
 		case data := <-fa.ch:
 			buf.Write(data)
@@ -279,6 +298,18 @@ func (fa *fileAppender) runFlushLoop() {
 	}
 }
 
+// drainPending 将通道中残留的数据全部写入本地批量缓冲（不落盘）。
+func (fa *fileAppender) drainPending(buf *bytes.Buffer) {
+	for {
+		select {
+		case data := <-fa.ch:
+			buf.Write(data)
+		default:
+			return
+		}
+	}
+}
+
 // drainAsync 排空通道中所有残留数据。
 func (fa *fileAppender) drainAsync() {
 	for {
@@ -286,13 +317,17 @@ func (fa *fileAppender) drainAsync() {
 		case data := <-fa.ch:
 			fa.mu.Lock()
 			if err := fa.checkRotation(len(data)); err != nil {
-				fmt.Fprintf(os.Stderr, "logx：关闭排空轮转失败：%v\n", err)
+				fa.reportError(fmt.Errorf("关闭排空轮转失败：%w", err))
 				fa.mu.Unlock()
 				continue
 			}
 			n, err := fa.file.Write(data)
 			if err == nil {
 				fa.currentSize += int64(n)
+				fa.written.Add(1)
+				fa.writeBytes.Add(uint64(n))
+			} else {
+				fa.reportError(fmt.Errorf("关闭排空写入失败：%w", err))
 			}
 			fa.mu.Unlock()
 		default:
@@ -313,9 +348,12 @@ func (fa *fileAppender) syncAsync() error {
 			if err := fa.checkRotation(len(data)); err != nil {
 				return err
 			}
-			if _, err := fa.file.Write(data); err != nil {
+			n, err := fa.file.Write(data)
+			if err != nil {
 				return err
 			}
+			fa.written.Add(1)
+			fa.writeBytes.Add(uint64(n))
 		default:
 			if fa.file != nil {
 				return fa.file.Sync()
@@ -347,13 +385,13 @@ func (fa *fileAppender) openNewFile() error {
 
 	// 关闭旧文件
 	if fa.file != nil {
-		fa.file.Close()
+		closeFileFn(fa.file)
 	}
 
 	fa.file = f
 
 	// 获取当前文件大小
-	info, err := f.Stat()
+	info, err := fileStatFn(f)
 	if err != nil {
 		return fmt.Errorf("logx：获取文件状态失败：%w", err)
 	}
@@ -387,25 +425,56 @@ func (fa *fileAppender) checkRotation(dataLen int) error {
 	}
 
 	if needRotate {
+		fa.rotations.Add(1)
 		return fa.openNewFile()
 	}
 
 	return nil
 }
 
+// 可替换的系统函数（测试注入用，生产行为不变）。
+var (
+	removePathFn    = os.Remove
+	createSymlinkFn = os.Symlink
+	absPathFn       = filepath.Abs
+	openSrcFileFn   = os.Open
+	createDstFileFn = os.Create
+	pathStatFn      = os.Stat
+	fileStatFn      = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+	sortStatFn      = os.Stat
+	ioCopyFn        = io.Copy
+	closeFileFn     = func(f *os.File) error { return f.Close() }
+	closeGzipFn     = func(w gzipWriteCloser) error { return w.Close() }
+)
+
+// gzipWriteCloser 是 gzip.Writer 的窄接口，便于测试注入关闭失败。
+type gzipWriteCloser interface {
+	io.Writer
+	Close() error
+}
+
+// newGzipWriterFn 创建 gzip 写入器（可注入）。
+var newGzipWriterFn = func(w io.Writer) gzipWriteCloser {
+	return gzip.NewWriter(w)
+}
+
 // updateSymlink 创建或更新软链接，使其指向最新的物理文件。
 func (fa *fileAppender) updateSymlink(physicalPath string) {
 	// Windows 不支持 Symlink（需要特殊权限），非 Windows 才创建
-	if runtime.GOOS == "windows" {
+	if platformIsWindows {
 		return
 	}
+	fa.createSymlink(physicalPath)
+}
 
+// createSymlink 实际创建软链接（不包含平台判断，便于测试）。
+func (fa *fileAppender) createSymlink(physicalPath string) {
 	// 删除旧软链接
-	os.Remove(fa.symlinkPath)
+	removePathFn(fa.symlinkPath)
 
 	// 创建新软链接
-	if err := os.Symlink(filepath.Base(physicalPath), fa.symlinkPath); err != nil {
-		fmt.Fprintf(os.Stderr, "logx：创建软链接失败：%v\n", err)
+	if err := createSymlinkFn(filepath.Base(physicalPath), fa.symlinkPath); err != nil {
+		fa.reportError(fmt.Errorf("创建软链接失败：%w", err))
 	}
 }
 
@@ -426,7 +495,7 @@ func (fa *fileAppender) runLifecycle() {
 	// 启动时立即执行一次清理
 	fa.cleanup()
 
-	ticker := time.NewTicker(10 * time.Minute) // 每 10 分钟检查一次
+	ticker := time.NewTicker(lifecycleCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -441,12 +510,13 @@ func (fa *fileAppender) runLifecycle() {
 
 // cleanup 执行一次完整的清理周期：删除过期文件 + 压缩旧文件。
 func (fa *fileAppender) cleanup() {
+	fa.cleanups.Add(1)
+
 	pattern := fmt.Sprintf("%s-*%s", fa.basenameNoExt, fa.ext)
 	globPattern := filepath.Join(fa.dir, pattern)
 
-	matches, err := filepath.Glob(globPattern)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "logx：扫描日志文件失败：%v\n", err)
+	matches := fa.scanMatches(globPattern)
+	if matches == nil {
 		return
 	}
 
@@ -469,18 +539,20 @@ func (fa *fileAppender) cleanup() {
 			if path == currentPhysical {
 				continue // 不删除当前文件
 			}
-			info, err := os.Stat(path)
+			info, err := pathStatFn(path)
 			if err != nil {
 				continue
 			}
 			if info.ModTime().Before(cutoff) {
-				os.Remove(path)
+				if rmErr := os.Remove(path); rmErr != nil {
+					fa.reportError(fmt.Errorf("按 MaxAge 清理日志文件失败 %s：%w", path, rmErr))
+				}
 			}
 		}
 	}
 
 	// 重新扫描（部分文件已被删除）
-	matches, _ = filepath.Glob(globPattern)
+	matches = fa.scanMatches(globPattern)
 	sortByModTime(matches)
 
 	// 第二遍：按 MaxBackups 删除（保留最新的 N 个）
@@ -494,7 +566,9 @@ func (fa *fileAppender) cleanup() {
 			if deleted >= toDelete {
 				break
 			}
-			os.Remove(path)
+			if rmErr := os.Remove(path); rmErr != nil {
+				fa.reportError(fmt.Errorf("按 MaxBackups 清理日志文件失败 %s：%w", path, rmErr))
+			}
 			deleted++
 		}
 	}
@@ -502,7 +576,7 @@ func (fa *fileAppender) cleanup() {
 	// 第三遍：压缩超过 CompressAfter 天的文件
 	if fa.cfg.CompressAfter > 0 {
 		compressCutoff := now.AddDate(0, 0, -fa.cfg.CompressAfter)
-		matches, _ = filepath.Glob(globPattern)
+		matches = fa.scanMatches(globPattern)
 		for _, path := range matches {
 			if path == currentPhysical {
 				continue
@@ -510,7 +584,7 @@ func (fa *fileAppender) cleanup() {
 			if strings.HasSuffix(path, ".gz") {
 				continue
 			}
-			info, err := os.Stat(path)
+			info, err := pathStatFn(path)
 			if err != nil {
 				continue
 			}
@@ -521,48 +595,90 @@ func (fa *fileAppender) cleanup() {
 	}
 }
 
+// scanMatches 扫描匹配的日志文件。扫描失败时上报错误并返回 nil。
+func (fa *fileAppender) scanMatches(globPattern string) []string {
+	matches, err := filepath.Glob(globPattern)
+	if err != nil {
+		fa.reportError(fmt.Errorf("扫描日志文件失败：%w", err))
+		return nil
+	}
+	return matches
+}
+
 // compressFile 将指定文件压缩为 .gz 格式，压缩成功后将原文件删除。
 func (fa *fileAppender) compressFile(path string) {
 	gzPath := path + ".gz"
 
 	// 打开源文件
-	src, err := os.Open(path)
+	src, err := openSrcFileFn(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "logx：压缩-打开源文件失败 %s：%v\n", path, err)
+		fa.reportError(fmt.Errorf("压缩-打开源文件失败 %s：%w", path, err))
 		return
 	}
-	defer src.Close()
 
 	// 创建目标 .gz 文件
-	dst, err := os.Create(gzPath)
+	dst, err := createDstFileFn(gzPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "logx：压缩-创建目标文件失败 %s：%v\n", gzPath, err)
+		fa.reportError(fmt.Errorf("压缩-创建目标文件失败 %s：%w", gzPath, err))
 		return
 	}
 
-	gw := gzip.NewWriter(dst)
-	if _, err := io.Copy(gw, src); err != nil {
-		gw.Close()
-		dst.Close()
-		os.Remove(gzPath)
-		fmt.Fprintf(os.Stderr, "logx：压缩-写入失败 %s：%v\n", path, err)
+	gw := newGzipWriterFn(dst)
+	if _, err := ioCopyFn(gw, src); err != nil {
+		closeGzipFn(gw)
+		closeFileFn(dst)
+		removePathFn(gzPath)
+		fa.reportError(fmt.Errorf("压缩-写入失败 %s：%w", path, err))
 		return
 	}
 
-	if err := gw.Close(); err != nil {
-		dst.Close()
-		os.Remove(gzPath)
-		fmt.Fprintf(os.Stderr, "logx：压缩-关闭gzip失败 %s：%v\n", path, err)
+	if err := closeGzipFn(gw); err != nil {
+		closeFileFn(dst)
+		removePathFn(gzPath)
+		fa.reportError(fmt.Errorf("压缩-关闭gzip失败 %s：%w", path, err))
 		return
 	}
-	if err := dst.Close(); err != nil {
-		os.Remove(gzPath)
-		fmt.Fprintf(os.Stderr, "logx：压缩-关闭文件失败 %s：%v\n", path, err)
+	if err := closeFileFn(dst); err != nil {
+		removePathFn(gzPath)
+		fa.reportError(fmt.Errorf("压缩-关闭文件失败 %s：%w", path, err))
 		return
 	}
 
-	// 压缩成功后删除原文件
-	os.Remove(path)
+	// 压缩成功后先关闭源文件再删除（Windows 下打开的文件无法删除）
+	if err := closeFileFn(src); err != nil {
+		removePathFn(gzPath)
+		fa.reportError(fmt.Errorf("压缩-关闭源文件失败 %s：%w", path, err))
+		return
+	}
+	if rmErr := removePathFn(path); rmErr != nil {
+		fa.reportError(fmt.Errorf("压缩后删除源文件失败 %s：%w", path, rmErr))
+		return
+	}
+	fa.compressions.Add(1)
+}
+
+// reportError 将内部错误统一交给错误处理器；未配置时降级输出到 stderr。
+func (fa *fileAppender) reportError(err error) {
+	if err == nil {
+		return
+	}
+	if fa.errorHandler != nil {
+		fa.errorHandler(err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "logx：%v\n", err)
+}
+
+// Metrics 返回文件输出器的运行指标快照。
+func (fa *fileAppender) Metrics() Metrics {
+	return Metrics{
+		Writes:       fa.written.Load(),
+		WriteBytes:   fa.writeBytes.Load(),
+		Drops:        fa.dropped.Load(),
+		Rotations:    fa.rotations.Load(),
+		Compressions: fa.compressions.Load(),
+		Cleanups:     fa.cleanups.Load(),
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -573,8 +689,8 @@ func (fa *fileAppender) compressFile(path string) {
 func sortByModTime(paths []string) {
 	for i := 0; i < len(paths); i++ {
 		for j := i + 1; j < len(paths); j++ {
-			infoI, errI := os.Stat(paths[i])
-			infoJ, errJ := os.Stat(paths[j])
+			infoI, errI := sortStatFn(paths[i])
+			infoJ, errJ := sortStatFn(paths[j])
 			if errI != nil || errJ != nil {
 				continue
 			}

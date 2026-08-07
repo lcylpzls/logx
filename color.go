@@ -10,8 +10,6 @@ var (
 	colorGreen  = []byte("\033[32m")
 	colorYellow = []byte("\033[33m")
 	colorBlue   = []byte("\033[34m")
-	colorCyan   = []byte("\033[36m")
-	colorGray   = []byte("\033[90m")
 )
 
 // levelColor 返回指定日志级别对应的 ANSI 颜色码字节序列。

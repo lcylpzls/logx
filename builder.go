@@ -3,10 +3,10 @@ package logx
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -28,7 +28,10 @@ import (
 //	    Build()
 type Builder struct {
 	cores      []coreConfig
-	callerSkip int // 0=禁用调用者追踪，3=启用（默认跳过值）
+	callerSkip int     // 0=禁用调用者追踪，3=启用（默认跳过值）
+	enc        Encoder // 后续通道使用的编码器（nil=默认纯文本）
+	sampler    *sampler
+	redacted   map[string]struct{}
 }
 
 // coreConfig 描述一个输出通道的配置。
@@ -37,6 +40,8 @@ type coreConfig struct {
 	minLvl  Level        // 该通道启用的最低日志级别
 	color   bool         // 控制台是否启用颜色
 	fileCfg *FileConfig  // 文件通道专属配置（nil 表示控制台通道）
+	enc     Encoder      // 通道编码器（nil=默认纯文本）
+	writer  io.Writer    // writer 通道的目标写入器
 }
 
 // appenderType 标识输出通道类型。
@@ -45,6 +50,7 @@ type appenderType string
 const (
 	consoleAppenderType appenderType = "console"
 	fileAppenderType    appenderType = "file"
+	writerAppenderType  appenderType = "writer"
 )
 
 // osExit 是 os.Exit 的包装，允许测试中替换。
@@ -59,6 +65,37 @@ func NewBuilder() *Builder {
 // 格式：file.go:42
 func (b *Builder) WithCaller() *Builder {
 	b.callerSkip = 1 // 从 runtime.Caller 开始，由 isLogxFrame 过滤到业务代码
+	return b
+}
+
+// WithEncoder 设置后续添加通道使用的编码器，默认使用纯文本编码器。
+// 例如 logx.NewBuilder().WithEncoder(logx.NewJSONEncoder()) 可以让后续通道输出 JSON。
+func (b *Builder) WithEncoder(enc Encoder) *Builder {
+	b.enc = enc
+	return b
+}
+
+// WithSampling 启用按秒限流采样：同一秒内最多输出 maxPerSecond 条日志，超出部分丢弃。
+// 用于故障风暴场景保护磁盘 IO。maxPerSecond <= 0 表示不采样。
+func (b *Builder) WithSampling(maxPerSecond int) *Builder {
+	if maxPerSecond > 0 {
+		b.sampler = newSampler(maxPerSecond)
+	}
+	return b
+}
+
+// WithRedact 配置自动脱敏的字段 key。匹配的字段（含 Lazy 字段）在编码前
+// 会被替换为 "***"，避免手机号、密码等敏感信息落入日志。
+func (b *Builder) WithRedact(keys ...string) *Builder {
+	for _, k := range keys {
+		if k == "" {
+			continue
+		}
+		if b.redacted == nil {
+			b.redacted = make(map[string]struct{})
+		}
+		b.redacted[k] = struct{}{}
+	}
 	return b
 }
 
@@ -116,6 +153,26 @@ func (b *Builder) EnableConsole(opts ...ConsoleOption) *Builder {
 	return b
 }
 
+// EnableWriter 开启自定义 io.Writer 输出通道，便于将日志路由到网络、消息队列等目标。
+// 与 EnableConsole 一样，必须显式传入要启用的日志级别。
+func (b *Builder) EnableWriter(w io.Writer, levels ...Level) *Builder {
+	minLvl := OffLevel
+	for _, lv := range levels {
+		if minLvl == OffLevel || lv < minLvl {
+			minLvl = lv
+		}
+	}
+
+	cfg := coreConfig{
+		appType: writerAppenderType,
+		minLvl:  minLvl,
+		enc:     b.enc,
+		writer:  w,
+	}
+	b.cores = append(b.cores, cfg)
+	return b
+}
+
 // ---------------------------------------------------------------------------
 // 文件通道配置
 // ---------------------------------------------------------------------------
@@ -142,6 +199,8 @@ type FileConfig struct {
 	BufferSize    int           // 异步通道缓冲大小，默认 4096
 	FlushInterval time.Duration // 异步批量刷盘间隔，默认 1 秒
 	Levels        []Level       // 启用的日志级别列表
+	ErrorHandler  func(error)   // 内部错误统一回调（nil=输出到 stderr）
+	OnDropped     func()        // 异步队列满、日志被丢弃时的回调
 }
 
 // FileOption 文件通道配置函数类型。
@@ -217,6 +276,22 @@ func WithLevels(levels ...Level) FileOption {
 	}
 }
 
+// WithErrorHandler 设置文件通道内部错误的统一处理回调。
+// 未设置时，内部错误降级输出到标准错误流。
+func WithErrorHandler(fn func(error)) FileOption {
+	return func(c *FileConfig) {
+		c.ErrorHandler = fn
+	}
+}
+
+// WithOnDropped 设置异步队列满、日志被丢弃时的回调。
+// 回调在调用方协程内同步执行，请保持轻量。
+func WithOnDropped(fn func()) FileOption {
+	return func(c *FileConfig) {
+		c.OnDropped = fn
+	}
+}
+
 // EnableFileLog 开启文件输出通道，接收文件配置项。
 //
 // 必须通过 WithLevels() 指定启用的日志级别，否则该通道保持静默。
@@ -245,6 +320,7 @@ func (b *Builder) EnableFileLog(opts ...FileOption) *Builder {
 		appType: fileAppenderType,
 		minLvl:  minLvl,
 		fileCfg: fc,
+		enc:     b.enc,
 	}
 	b.cores = append(b.cores, cfg)
 	return b
@@ -259,6 +335,8 @@ func (b *Builder) EnableFileLog(opts ...FileOption) *Builder {
 func (b *Builder) Build() (Logger, error) {
 	l := &logger{
 		callerSkip: b.callerSkip,
+		sampler:    b.sampler,
+		redacted:   b.redacted,
 	}
 
 	for i := range b.cores {
@@ -278,11 +356,19 @@ func (b *Builder) Build() (Logger, error) {
 				return nil, fmt.Errorf("logx：创建文件输出器失败：%w", err)
 			}
 			app = fa
+		case writerAppenderType:
+			if cfg.writer == nil {
+				return nil, fmt.Errorf("logx：writer 通道未提供 io.Writer")
+			}
+			app = newWriterAppender(cfg.writer)
 		default:
 			return nil, fmt.Errorf("logx：未知的输出通道类型：%s", cfg.appType)
 		}
 
-		enc := newTextEncoder(cfg.color)
+		enc := cfg.enc
+		if enc == nil {
+			enc = newTextEncoder(cfg.color)
+		}
 
 		c := newCore(enc, app, cfg.minLvl)
 		l.cores = append(l.cores, c)
@@ -301,14 +387,15 @@ type logger struct {
 	fields     []Field
 	ctx        context.Context
 	hooks      *hookManager
+	sampler    *sampler
+	redacted   map[string]struct{}
 	callerSkip int // 0=不追踪，>0=runtime.Caller 跳过值
-	mu         sync.Mutex
 }
 
 // IsDebugEnabled 判断是否有任何 core 启用了 Debug 级别。
 func (l *logger) IsDebugEnabled() bool {
 	for _, c := range l.cores {
-		if isLevelEnabled(c.minLvl, DebugLevel) {
+		if isLevelEnabled(c.minLevel(), DebugLevel) {
 			return true
 		}
 	}
@@ -383,6 +470,8 @@ func (l *logger) WithContext(ctx context.Context) Logger {
 		fields:     l.copyFields(),
 		ctx:        ctx,
 		hooks:      l.hooks,
+		sampler:    l.sampler,
+		redacted:   l.redacted,
 		callerSkip: l.callerSkip,
 	}
 }
@@ -397,8 +486,56 @@ func (l *logger) WithField(key string, val any) Logger {
 		fields:     newFields,
 		ctx:        l.ctx,
 		hooks:      l.hooks,
+		sampler:    l.sampler,
+		redacted:   l.redacted,
 		callerSkip: l.callerSkip,
 	}
+}
+
+// SetLevel 动态调整日志级别。传入的所有 Level 中最低的一个将成为
+// 所有通道的新启用的最低级别（不影响已关闭的静默通道）。
+func (l *logger) SetLevel(levels ...Level) {
+	if len(levels) == 0 {
+		return
+	}
+	min := levels[0]
+	for _, lv := range levels[1:] {
+		if lv < min {
+			min = lv
+		}
+	}
+	for _, c := range l.cores {
+		c.setMinLevel(min)
+	}
+}
+
+// LevelUpdater 是提供运行时动态调整日志级别能力的可选接口。
+// Logger 的默认实现支持该接口，通过类型断言使用：
+//
+//	if lu, ok := logger.(logx.LevelUpdater); ok {
+//	    lu.SetLevel(logx.DebugLevel)
+//	}
+type LevelUpdater interface {
+	SetLevel(levels ...Level)
+}
+
+// Metrics 汇总所有通道的运行指标快照。
+func (l *logger) Metrics() Metrics {
+	var m Metrics
+	for _, c := range l.cores {
+		mp, ok := c.app.(MetricProvider)
+		if !ok {
+			continue
+		}
+		cm := mp.Metrics()
+		m.Writes += cm.Writes
+		m.WriteBytes += cm.WriteBytes
+		m.Drops += cm.Drops
+		m.Rotations += cm.Rotations
+		m.Compressions += cm.Compressions
+		m.Cleanups += cm.Cleanups
+	}
+	return m
 }
 
 // --- 生命周期 ---
@@ -433,11 +570,16 @@ func (l *logger) SafeExit(exitFunc func()) {
 
 // log 是统一的日志写入入口。
 func (l *logger) log(level Level, msg string, fields []Field) {
+	// 采样：超过每秒上限的日志直接丢弃
+	if l.sampler != nil && !l.sampler.allow() {
+		return
+	}
+
 	e := &Entry{
 		Level:   level,
 		Time:    time.Now(),
 		Message: msg,
-		Fields:  l.mergeFields(fields),
+		Fields:  l.redactFields(l.mergeFields(fields)),
 		ctx:     l.ctx,
 	}
 
@@ -457,7 +599,7 @@ func (l *logger) log(level Level, msg string, fields []Field) {
 					continue
 				}
 				// 跳过 Go runtime 栈帧
-				if isRuntimeFrame(frame.Function) {
+				if isRuntimeFrameFn(frame.Function) {
 					continue
 				}
 				e.CallerFile = frame.File
@@ -498,6 +640,23 @@ func (l *logger) copyFields() []Field {
 	return f
 }
 
+// redactFields 将命中脱敏配置的字段值替换为 "***"。
+// 若未配置脱敏或没有字段，直接返回原切片，避免额外分配。
+func (l *logger) redactFields(fields []Field) []Field {
+	if len(l.redacted) == 0 || len(fields) == 0 {
+		return fields
+	}
+	out := make([]Field, len(fields))
+	for i, f := range fields {
+		if _, ok := l.redacted[f.Key]; ok {
+			out[i] = Field{Key: f.Key, Value: "***"}
+			continue
+		}
+		out[i] = f
+	}
+	return out
+}
+
 // isLogxInternal 判断函数是否属于 logx 库内部（logger 方法、core.write 等）。
 // 通过函数名而非文件路径判断，不受目录名和 inlining 影响。
 func isLogxInternal(fn string) bool {
@@ -514,3 +673,6 @@ func isRuntimeFrame(fn string) bool {
 	return strings.HasPrefix(fn, "runtime.") ||
 		strings.HasPrefix(fn, "testing.")
 }
+
+// isRuntimeFrameFn 运行时帧判断函数（测试注入用，生产行为不变）。
+var isRuntimeFrameFn = isRuntimeFrame

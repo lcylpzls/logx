@@ -50,6 +50,12 @@ func main() {
 - 🎨 **控制台色彩** — 按级别高亮（Debug 蓝 / Info 绿 / Warn 黄 / Error 红），落盘自动剥离
 - 📁 **工业级文件管理** — 原子切割（大小+时间）、Symlink 软链接、Gzip 压缩、自动清理
 - ⚙️ **双引擎写入** — 异步批量（高吞吐）与绝对同步（强可靠）随意切换
+- 🧾 **JSON 编码器** — 单行 JSON 输出，无缝对接 ELK / Loki 等日志采集系统
+- 🎛️ **动态级别** — 运行时热更新日志级别，无需重启服务
+- 🧯 **采样与脱敏** — 每秒限流防故障风暴，敏感字段自动打码
+- 🔌 **自定义 Writer** — 任意 `io.Writer` 输出通道（网络、消息队列等）
+- 📊 **可观测指标** — 写入/丢弃/轮转/压缩计数，`Metrics()` 一键获取
+- 🛡️ **统一错误回调** — 轮转、清理、压缩失败不再静默吞掉
 - 🛡️ **默认静默** — 所有通道/级别默认关闭，必须显式传入级别参数，避免隐式开销
 - 🔗 **零外部依赖** — 纯 Go 标准库，不引入任何第三方模块
 - 📍 **调用者追踪** — 一键 `WithCaller()` 定位日志源码位置，零性能开销
@@ -214,6 +220,85 @@ logger.(logx.HookedLogger).AddHook(&AlertHook{})
 
 Hook 以异步 goroutine 执行，内置 panic recovery，绝不阻塞日志主路径。
 
+### 11. JSON 编码
+
+文件/自定义通道可通过 `WithEncoder` 切换为单行 JSON：
+
+```go
+logger, _ := logx.NewBuilder().
+    WithEncoder(logx.NewJSONEncoder()).
+    EnableFileLog(
+        logx.WithLogDir("/var/log/myapp"),
+        logx.WithFilename("app.log"),
+        logx.WithLevels(logx.InfoLevel),
+    ).
+    Build()
+```
+
+输出示例：
+
+```json
+{"time":"2026-06-06 15:04:05.000","level":"info","caller":"main.go:15","message":"服务启动成功","port":8080}
+```
+
+### 12. 动态级别热更新
+
+运行时调整日志级别，无需重建 Logger（默认实现支持 `LevelUpdater` 可选接口）：
+
+```go
+if lu, ok := logger.(logx.LevelUpdater); ok {
+    lu.SetLevel(logx.DebugLevel) // 热切换为 Debug
+}
+```
+
+### 13. 采样与脱敏
+
+```go
+logger, _ := logx.NewBuilder().
+    WithSampling(1000).               // 每秒最多输出 1000 条，超出丢弃
+    WithRedact("password", "token").  // 匹配字段自动替换为 ***
+    EnableConsole(logx.InfoLevel).
+    Build()
+```
+
+### 14. 自定义 io.Writer 通道
+
+```go
+logger, _ := logx.NewBuilder().
+    EnableWriter(myNetworkWriter, logx.InfoLevel).
+    Build()
+```
+
+### 15. 错误处理与运行指标
+
+文件通道内部错误（轮转/清理/压缩失败）统一交给回调，不再静默吞掉：
+
+```go
+EnableFileLog(
+    logx.WithErrorHandler(func(err error) { monitor.Report(err) }),
+    logx.WithOnDropped(func() { monitor.CountDrop() }), // 异步队列满丢弃时触发
+)
+```
+
+通过可选接口 `MetricProvider` 获取原子计数：
+
+```go
+if mp, ok := logger.(logx.MetricProvider); ok {
+    m := mp.Metrics() // Writes / WriteBytes / Drops / Rotations / Compressions / Cleanups
+}
+```
+
+### 16. 信号与优雅退出
+
+`SafeExit` 之外，生产环境推荐配合系统信号使用（完整示例见 `examples/graceful_shutdown`）：
+
+```go
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+<-ctx.Done()
+logger.Sync() // 先刷盘再退出
+```
+
 ---
 
 ## 性能基准
@@ -303,14 +388,18 @@ logx/
 ├── core.go               # 核心引擎（级别过滤 + 编码 + 写入）
 ├── builder.go            # Builder 链式构造器
 ├── text_encoder.go       # 零分配纯文本编码器
+├── json_encoder.go       # 单行 JSON 编码器
 ├── console_appender.go   # 控制台输出器（stdout/stderr 分流）
 ├── file_appender.go      # 文件输出器（同步/异步 + 轮转）
+├── writer_appender.go    # io.Writer 输出器
 ├── buffer.go             # 2MB sync.Pool 缓冲池
 ├── time_cache.go         # 100ms 时间缓存
 ├── color.go              # ANSI 色彩常量
 ├── stdlog.go             # 标准库 log 劫持
 ├── hook.go               # Hook 扩展接口
-└── logx_test.go          # 测试与 Benchmark
+├── sampler.go            # 按秒限流采样器
+├── metrics.go            # 运行指标
+└── *_test.go             # 测试与 Benchmark（按组件拆分）
 ```
 
 ---
@@ -326,6 +415,41 @@ logx/
 | [advanced](examples/advanced/) | 完整功能：双通道 + 色彩 + Hook |
 | [stdlog](examples/stdlog/) | 劫持标准库 log |
 | [bench](examples/bench/) | 压力测试：吞吐量测量 |
+| [bench_compare](examples/bench_compare/) | 与 Zap / Logrus 的微基准对比 |
+| [graceful_shutdown](examples/graceful_shutdown/) | 信号监听 + 优雅刷盘退出 |
+
+### 竞品微基准
+
+在 `examples/bench_compare` 中与 Zap / Logrus 对比（同环境、同消息、同 3 字段、纯文本输出到 `io.Discard`）：
+
+```bash
+cd examples/bench_compare
+go test -bench=. -benchmem ./...
+```
+
+> 基准结果与机器环境强相关，请以本机实测为准。
+
+## 平台与精度说明
+
+- **时间缓存**：格式化时间由后台协程每 100ms 更新一次，日志时间精度约 100ms，换取零分配输出；
+- **Windows Symlink**：Windows 创建软链接需要特殊权限，文件通道自动跳过 `app.log` 软链，物理文件命名不受影响；
+- **竞态检测**：Windows 本地执行 `go test -race` 需要 gcc（如 mingw-w64）；CI 已在 Linux 上覆盖竞态检测。
+
+## 开发与发布
+
+质量门禁命令：
+
+```bash
+go vet ./...                              # 静态检查，必须零告警
+staticcheck ./...                         # 深度静态检查，必须零告警
+go test -race -coverprofile=coverage.out ./...  # 测试 + 竞态 + 覆盖率
+go tool cover -func coverage.out          # 覆盖率目标 100%
+go test -bench=. -benchmem ./...          # 微基准
+```
+
+- **API 兼容性**：发布前建议使用 `apidiff`（`go install golang.org/x/exp/cmd/apidiff@latest`）对比上一版本；破坏性变更必须提升主版本号；
+- **发布流程**：推送形如 `v0.10.0` 的 tag（可用 `git_push.ps1` 或 `git_push.sh`），GitHub Actions 自动测试并生成 Release；
+- **本地开发**：仓库提供 `go.work`，可在根目录直接联调所有 examples。
 
 ---
 

@@ -31,14 +31,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	logger.Info("服务启动，按 Ctrl+C 优雅退出")
+	logger.Info("服务启动，按 Ctrl+C 优雅退出", logx.FieldGroup{})
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("收到退出信号，正在刷盘...")
+			logger.Info("收到退出信号，正在刷盘...", logx.FieldGroup{})
 			if err := logger.Sync(); err != nil {
 				fmt.Fprintf(os.Stderr, "刷盘失败：%v\n", err)
 			}
@@ -48,7 +48,7 @@ func main() {
 			fmt.Println("已安全退出")
 			return
 		case <-ticker.C:
-			logger.Info("服务运行中")
+			logger.Info("服务运行中", logx.FieldGroup{})
 		}
 	}
 }

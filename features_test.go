@@ -24,7 +24,7 @@ func TestJSONEncoder_Basic(t *testing.T) {
 		Level:   InfoLevel,
 		Time:    time.Now(),
 		Message: "hello json",
-		Fields: []Field{
+		Fields: Fields(
 			String("name", "logx"),
 			Int("count", 3),
 			Int64("big", 1234567890123),
@@ -32,7 +32,7 @@ func TestJSONEncoder_Basic(t *testing.T) {
 			Any("ratio", 0.5),
 			Any("err", fmt.Errorf("boom")),
 			Any("nil", nil),
-		},
+		),
 	})
 	if err != nil {
 		t.Fatalf("Encode 失败：%v", err)
@@ -71,7 +71,7 @@ func TestJSONEncoder_Escaping(t *testing.T) {
 		Level:   ErrorLevel,
 		Time:    time.Now(),
 		Message: msg,
-		Fields:  []Field{String("k", msg)},
+		Fields:  Fields(String("k", msg)),
 	})
 	if err != nil {
 		t.Fatalf("Encode 失败：%v", err)
@@ -95,7 +95,7 @@ func TestJSONEncoder_Lazy(t *testing.T) {
 		Level:   InfoLevel,
 		Time:    time.Now(),
 		Message: "lazy",
-		Fields:  []Field{Lazy("info", func() any { called = true; return "computed" })},
+		Fields:  Fields(Lazy("info", func() any { called = true; return "computed" })),
 	})
 	if err != nil {
 		t.Fatalf("Encode 失败：%v", err)
@@ -140,7 +140,7 @@ func TestJSONEncoder_FieldTypes(t *testing.T) {
 		Level:   InfoLevel,
 		Time:    time.Now(),
 		Message: "types",
-		Fields: []Field{
+		Fields: Fields(
 			Any("i8", int8(-8)),
 			Any("i16", int16(-16)),
 			Any("i32", int32(-32)),
@@ -153,7 +153,7 @@ func TestJSONEncoder_FieldTypes(t *testing.T) {
 			Any("t", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 			Any("d", 3*time.Second),
 			Any("struct", struct{ A int }{1}),
-		},
+		),
 	})
 	if err != nil {
 		t.Fatalf("Encode 失败：%v", err)
@@ -292,7 +292,7 @@ func TestUpdateSymlink_NonWindowsPath(t *testing.T) {
 
 //go:noinline
 func logViaInternalHelper(l *logger) {
-	l.log(InfoLevel, "internal helper", nil)
+	l.log(InfoLevel, "internal helper", FieldGroup{})
 }
 
 func TestBuilder_WithJSONEncoderAndWriter(t *testing.T) {
@@ -305,7 +305,7 @@ func TestBuilder_WithJSONEncoderAndWriter(t *testing.T) {
 		t.Fatalf("Build 失败：%v", err)
 	}
 
-	logger.Info("json via writer", String("k", "v"))
+	logger.Info("json via writer", Fields(String("k", "v")))
 
 	var out map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &out); err != nil {
@@ -329,8 +329,8 @@ func TestBuilder_EnableWriter(t *testing.T) {
 		t.Fatalf("Build 失败：%v", err)
 	}
 
-	logger.Info("writer msg")
-	logger.Debug("should be filtered")
+	logger.Info("writer msg", FieldGroup{})
+	logger.Debug("should be filtered", FieldGroup{})
 	got := buf.String()
 	if !strings.Contains(got, "writer msg") {
 		t.Errorf("writer 未收到日志：%q", got)
@@ -346,7 +346,7 @@ func TestBuilder_EnableWriter_SilentWithoutLevels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build 失败：%v", err)
 	}
-	logger.Info("no output")
+	logger.Info("no output", FieldGroup{})
 	if buf.Len() != 0 {
 		t.Errorf("未指定级别时不应输出：%q", buf.String())
 	}
@@ -416,8 +416,8 @@ func TestBuilder_WithSampling(t *testing.T) {
 		t.Fatalf("Build 失败：%v", err)
 	}
 	// 冒烟测试：仅验证采样配置不 panic、不阻塞正常使用。
-	logger.Info("sampled")
-	logger.Info("maybe dropped")
+	logger.Info("sampled", FieldGroup{})
+	logger.Info("maybe dropped", FieldGroup{})
 }
 
 // ---------------------------------------------------------------------------
@@ -436,11 +436,11 @@ func TestWithRedact(t *testing.T) {
 	}
 
 	lazyCalled := false
-	logger.Info("login",
+	logger.Info("login", Fields(
 		String("password", "s3cret"),
 		String("user", "alice"),
 		Lazy("token", func() any { lazyCalled = true; return "raw-token" }),
-	)
+	))
 
 	got := buf.String()
 	if strings.Contains(got, "s3cret") || strings.Contains(got, "raw-token") {
@@ -482,7 +482,7 @@ func TestSetLevel(t *testing.T) {
 		t.Fatal("SetLevel 后应启用 Debug")
 	}
 
-	logger.Debug("debug now visible")
+	logger.Debug("debug now visible", FieldGroup{})
 	if !strings.Contains(buf.String(), "debug now visible") {
 		t.Errorf("Debug 日志未输出：%q", buf.String())
 	}
@@ -506,7 +506,7 @@ func TestSetLevel_Concurrent(t *testing.T) {
 		}
 	}()
 	for i := 0; i < 500; i++ {
-		logger.Info("concurrent")
+		logger.Info("concurrent", FieldGroup{})
 	}
 	<-done
 }
@@ -611,7 +611,8 @@ func TestCore_ReportWriteError(t *testing.T) {
 func TestAppendAsync_DropCountAndCallback(t *testing.T) {
 	dropped := 0
 	fa := &fileAppender{
-		ch: make(chan []byte, 1),
+		writeCh: make(chan []byte, 1),
+		freeCh:  make(chan []byte, 1),
 		cfg: FileConfig{
 			OnDropped: func() { dropped++ },
 		},
@@ -629,6 +630,100 @@ func TestAppendAsync_DropCountAndCallback(t *testing.T) {
 	}
 	if m := fa.Metrics(); m.Drops != 1 {
 		t.Errorf("丢弃计数不符：got %d, want 1", m.Drops)
+	}
+}
+
+func TestAppendAsync_OversizeSlot(t *testing.T) {
+	fa := &fileAppender{
+		writeCh: make(chan []byte, 1),
+		freeCh:  make(chan []byte, 1),
+		cfg:     FileConfig{},
+	}
+	fa.freeCh <- make([]byte, 0, 64)
+
+	payload := bytes.Repeat([]byte("x"), defaultSlotSize+128)
+	if _, err := fa.appendAsync(payload); err != nil {
+		t.Fatalf("appendAsync 失败：%v", err)
+	}
+	select {
+	case data := <-fa.writeCh:
+		if string(data) != string(payload) {
+			t.Error("超长日志内容不符")
+		}
+	default:
+		t.Fatal("超长日志未进入写通道")
+	}
+}
+
+func TestFieldGroup_Overflow(t *testing.T) {
+	fs := make([]Field, 0, maxInlineFields+2)
+	for i := 0; i < maxInlineFields+1; i++ {
+		fs = append(fs, Field{Key: fmt.Sprintf("k%d", i), Value: i})
+	}
+	g := Fields(fs...)
+	if g.Len() != maxInlineFields+1 {
+		t.Fatalf("Len 不符：got %d, want %d", g.Len(), maxInlineFields+1)
+	}
+	if g.At(maxInlineFields).Key != fmt.Sprintf("k%d", maxInlineFields) {
+		t.Errorf("rest 字段访问不符：%v", g.At(maxInlineFields))
+	}
+
+	// appendField 超出内联容量后的按需分配分支
+	g.appendField(Field{Key: "extra", Value: true})
+	if g.Len() != maxInlineFields+2 {
+		t.Errorf("appendField 后 Len 不符：%d", g.Len())
+	}
+	if g.At(maxInlineFields+1).Key != "extra" {
+		t.Error("appendField 追加的字段不在末尾")
+	}
+}
+
+func TestFieldGroup_AppendAllocatesRest(t *testing.T) {
+	// 逐条 appendField 填满内联容量，第 9 条触发 rest 分配分支
+	var g FieldGroup
+	for i := 0; i < maxInlineFields; i++ {
+		g.appendField(Field{Key: fmt.Sprintf("k%d", i), Value: i})
+	}
+	g.appendField(Field{Key: "overflow", Value: true})
+	if g.Len() != maxInlineFields+1 {
+		t.Fatalf("Len 不符：%d", g.Len())
+	}
+	if g.At(maxInlineFields).Key != "overflow" {
+		t.Error("溢出字段不在末尾")
+	}
+}
+
+func TestAppendAsync_WriteChannelFull(t *testing.T) {
+	dropped := 0
+	fa := &fileAppender{
+		writeCh: make(chan []byte, 1),
+		freeCh:  make(chan []byte, 1),
+		cfg: FileConfig{
+			OnDropped: func() { dropped++ },
+		},
+	}
+	fa.writeCh <- []byte("occupied")
+	fa.freeCh <- make([]byte, 0, 64)
+
+	if _, err := fa.appendAsync([]byte("overflow")); err != nil {
+		t.Fatalf("appendAsync 失败：%v", err)
+	}
+	if dropped != 1 {
+		t.Errorf("丢弃回调未触发：%d", dropped)
+	}
+	if m := fa.Metrics(); m.Drops != 1 {
+		t.Errorf("丢弃计数不符：%d", m.Drops)
+	}
+}
+
+func TestRecycleSlot_Full(t *testing.T) {
+	fa := &fileAppender{freeCh: make(chan []byte, 1)}
+	fa.freeCh <- make([]byte, 0, 64)
+
+	// 池已满：归还应静默丢弃，绝不阻塞
+	fa.recycleSlot(make([]byte, 0, 64))
+	if len(fa.freeCh) != 1 {
+		t.Errorf("池满时槽位不应入池：%d", len(fa.freeCh))
 	}
 }
 
@@ -654,8 +749,9 @@ func TestSyncAsync_WriteError(t *testing.T) {
 	defer app.Close()
 	fapp := app.(*fileAppender)
 	fapp.cfg.WriteMode = AsyncWriteMode
-	fapp.ch = make(chan []byte, 1)
-	fapp.ch <- []byte("pending")
+	fapp.writeCh = make(chan []byte, 1)
+	fapp.freeCh = make(chan []byte, 1)
+	fapp.writeCh <- []byte("pending")
 
 	// 关闭底层文件，强制 syncAsync 写失败
 	fapp.mu.Lock()
@@ -680,8 +776,9 @@ func TestSyncAsync_Success(t *testing.T) {
 	defer app.Close()
 	fapp := app.(*fileAppender)
 	fapp.cfg.WriteMode = AsyncWriteMode
-	fapp.ch = make(chan []byte, 1)
-	fapp.ch <- []byte("ok")
+	fapp.writeCh = make(chan []byte, 1)
+	fapp.freeCh = make(chan []byte, 1)
+	fapp.writeCh <- []byte("ok")
 
 	if err := fapp.syncAsync(); err != nil {
 		t.Fatalf("syncAsync 失败：%v", err)
@@ -1227,7 +1324,7 @@ func TestLogger_Metrics(t *testing.T) {
 	}
 	defer logger.Close()
 
-	logger.Info("metric entry")
+	logger.Info("metric entry", FieldGroup{})
 	logger.Sync()
 
 	mp, ok := logger.(MetricProvider)
@@ -1498,10 +1595,11 @@ func TestAsyncFlush_AfterCancel(t *testing.T) {
 	defer fa.Close()
 	fapp := fa.(*fileAppender)
 
-	fapp.cancel()
+	// 先入队再取消：确保数据在后台协程退出前已进入写通道
 	if _, err := fa.Append(InfoLevel, []byte("pending after cancel")); err != nil {
 		t.Fatalf("Append 失败：%v", err)
 	}
+	fapp.cancel()
 
 	// 后台协程应在退出前排空通道
 	deadline := time.Now().Add(5 * time.Second)
@@ -1569,8 +1667,9 @@ func TestDrainAsync_WriteError(t *testing.T) {
 	}
 	defer app.Close()
 	fapp := app.(*fileAppender)
-	fapp.ch = make(chan []byte, 1)
-	fapp.ch <- []byte("pending")
+	fapp.writeCh = make(chan []byte, 1)
+	fapp.freeCh = make(chan []byte, 1)
+	fapp.writeCh <- []byte("pending")
 
 	fapp.mu.Lock()
 	fapp.file.Close()
@@ -1596,8 +1695,9 @@ func TestDrainAsync_RotationError(t *testing.T) {
 	}
 	defer app.Close()
 	fapp := app.(*fileAppender)
-	fapp.ch = make(chan []byte, 1)
-	fapp.ch <- []byte("pending")
+	fapp.writeCh = make(chan []byte, 1)
+	fapp.freeCh = make(chan []byte, 1)
+	fapp.writeCh <- []byte("pending")
 
 	fapp.mu.Lock()
 	fapp.file.Close()
@@ -1626,8 +1726,9 @@ func TestSyncAsync_RotationError(t *testing.T) {
 	defer app.Close()
 	fapp := app.(*fileAppender)
 	fapp.cfg.WriteMode = AsyncWriteMode
-	fapp.ch = make(chan []byte, 1)
-	fapp.ch <- []byte("pending")
+	fapp.writeCh = make(chan []byte, 1)
+	fapp.freeCh = make(chan []byte, 1)
+	fapp.writeCh <- []byte("pending")
 
 	fapp.mu.Lock()
 	fapp.file.Close()
@@ -1663,9 +1764,12 @@ func TestSyncAsync_FileNilAfterClose(t *testing.T) {
 }
 
 func TestDrainPending(t *testing.T) {
-	fa := &fileAppender{ch: make(chan []byte, 2)}
-	fa.ch <- []byte("a")
-	fa.ch <- []byte("b")
+	fa := &fileAppender{
+		writeCh: make(chan []byte, 2),
+		freeCh:  make(chan []byte, 2),
+	}
+	fa.writeCh <- []byte("a")
+	fa.writeCh <- []byte("b")
 
 	var buf bytes.Buffer
 	fa.drainPending(&buf)
@@ -1753,7 +1857,7 @@ func FuzzJSONEncoder_Encode(f *testing.F) {
 			Level:   InfoLevel,
 			Time:    time.Now(),
 			Message: msg,
-			Fields:  []Field{String("k", field)},
+			Fields:  Fields(String("k", field)),
 		}); err != nil {
 			t.Fatalf("Encode 失败：%v", err)
 		}
@@ -1779,7 +1883,7 @@ func FuzzTextEncoder_Encode(f *testing.F) {
 			Level:   InfoLevel,
 			Time:    time.Now(),
 			Message: msg,
-			Fields:  []Field{String("k", field)},
+			Fields:  Fields(String("k", field)),
 		}); err != nil {
 			t.Fatalf("Encode 失败：%v", err)
 		}

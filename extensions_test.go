@@ -29,13 +29,13 @@ func TestLazy_DeferredEvaluation(t *testing.T) {
 	}
 
 	// Debug 未启用，Lazy 不应被执行
-	logger.Debug("debug msg", Lazy("data", fn))
+	logger.Debug("debug msg", Fields(Lazy("data", fn)))
 	if called {
 		t.Error("Debug 未启用时 Lazy 函数不应被调用")
 	}
 
 	// Info 已启用，Lazy 应被执行
-	logger.Info("info msg", Lazy("data", fn))
+	logger.Info("info msg", Fields(Lazy("data", fn)))
 	if !called {
 		t.Error("Info 启用时 Lazy 函数应被调用")
 	}
@@ -106,7 +106,7 @@ func TestHook(t *testing.T) {
 	}
 	hl.AddHook(testHook)
 
-	logger.Info("hook test message")
+	logger.Info("hook test message", FieldGroup{})
 
 	// 等待 Hook 异步执行
 	time.Sleep(50 * time.Millisecond)
@@ -176,9 +176,9 @@ func TestHook_NoPanic(t *testing.T) {
 	hl.AddHook(&panicHook{})
 
 	// 应该正常输出，不会 panic
-	logger.Info("before panic hook")
+	logger.Info("before panic hook", FieldGroup{})
 	time.Sleep(50 * time.Millisecond)
-	logger.Info("after panic hook")
+	logger.Info("after panic hook", FieldGroup{})
 }
 
 // panicHook 测试用：故意 panic 的 Hook。

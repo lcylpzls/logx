@@ -35,6 +35,6 @@ type stdLogWriter struct {
 // Write 实现 io.Writer。标准库 log 会在末尾追加换行符。
 func (w *stdLogWriter) Write(p []byte) (int, error) {
 	msg := strings.TrimRight(string(p), "\n\r")
-	w.logger.Info(msg)
+	w.logger.Info(msg, FieldGroup{})
 	return len(p), nil
 }

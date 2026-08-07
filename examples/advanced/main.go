@@ -46,10 +46,10 @@ func main() {
 	// 派生带上下文的 logger
 	userLogger := logger.WithField("user_id", "10086")
 
-	logger.Debug("调试信息", logx.Int("goroutine_count", 42))
-	userLogger.Info("用户操作")
-	logger.Warn("磁盘使用率偏高", logx.Int("percent", 85))
-	logger.Error("连接超时", logx.Err(fmt.Errorf("connection timeout")))
+	logger.Debug("调试信息", logx.Fields(logx.Int("goroutine_count", 42)))
+	userLogger.Info("用户操作", logx.FieldGroup{})
+	logger.Warn("磁盘使用率偏高", logx.Fields(logx.Int("percent", 85)))
+	logger.Error("连接超时", logx.Fields(logx.Err(fmt.Errorf("connection timeout"))))
 
 	a.TestLogCaller(logger)
 

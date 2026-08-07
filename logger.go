@@ -13,12 +13,12 @@ type Logger interface {
 
 	// --- 结构化 API ---
 
-	Debug(msg string, fields ...Field)
-	Info(msg string, fields ...Field)
-	Warn(msg string, fields ...Field)
-	Error(msg string, fields ...Field)
-	Panic(msg string, fields ...Field) // 输出后触发 panic
-	Fatal(msg string, fields ...Field) // 输出后退出进程
+	Debug(msg string, fields FieldGroup)
+	Info(msg string, fields FieldGroup)
+	Warn(msg string, fields FieldGroup)
+	Error(msg string, fields FieldGroup)
+	Panic(msg string, fields FieldGroup) // 输出后触发 panic
+	Fatal(msg string, fields FieldGroup) // 输出后退出进程
 
 	// --- 格式化 API ---
 

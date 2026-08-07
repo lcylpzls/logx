@@ -63,9 +63,10 @@ func (e *textEncoder) Encode(buf *Buffer, entry *Entry) error {
 	buf.B = append(buf.B, entry.Message...)
 
 	// 结构化字段
-	if len(entry.Fields) > 0 {
+	if entry.Fields.Len() > 0 {
 		buf.B = append(buf.B, ' ', ' ', '{')
-		for i, f := range entry.Fields {
+		for i := 0; i < entry.Fields.Len(); i++ {
+			f := entry.Fields.At(i)
 			if i > 0 {
 				buf.B = append(buf.B, ',', ' ')
 			}

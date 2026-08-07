@@ -18,9 +18,9 @@ func TestNewBuilder_DefaultOff(t *testing.T) {
 		t.Fatalf("Build() 失败：%v", err)
 	}
 	// 不调用任何 log 方法应该不会 panic，也不应有输出。
-	logger.Info("这条日志不应该出现")
-	logger.Debug("这条日志也不应该出现")
-	logger.Error("这条日志同样不应该出现")
+	logger.Info("这条日志不应该出现", FieldGroup{})
+	logger.Debug("这条日志也不应该出现", FieldGroup{})
+	logger.Error("这条日志同样不应该出现", FieldGroup{})
 
 	// Sync 和 Close 不应该出错。
 	if err := logger.Sync(); err != nil {
@@ -51,10 +51,10 @@ func TestBuilder_ConsoleDebug(t *testing.T) {
 	}
 
 	// 所有级别都 >= Debug，不会 panic。
-	logger.Debug("debug msg", String("k", "v"))
-	logger.Info("info msg")
-	logger.Warn("warn msg")
-	logger.Error("error msg")
+	logger.Debug("debug msg", Fields(String("k", "v")))
+	logger.Info("info msg", FieldGroup{})
+	logger.Warn("warn msg", FieldGroup{})
+	logger.Error("error msg", FieldGroup{})
 }
 
 func TestBuilder_ConsoleInfoOnly(t *testing.T) {
@@ -69,8 +69,8 @@ func TestBuilder_ConsoleInfoOnly(t *testing.T) {
 		t.Error("仅 EnableInfo 时 IsDebugEnabled 应返回 false")
 	}
 
-	logger.Info("这条应该输出")
-	logger.Debug("这条不应该输出")
+	logger.Info("这条应该输出", FieldGroup{})
+	logger.Debug("这条不应该输出", FieldGroup{})
 }
 
 func TestBuilder_ConsoleErrorOnly(t *testing.T) {
@@ -85,9 +85,9 @@ func TestBuilder_ConsoleErrorOnly(t *testing.T) {
 		t.Error("仅 EnableError 时 IsDebugEnabled 应返回 false")
 	}
 
-	logger.Error("这条应该输出")
-	logger.Info("这条不应该输出")
-	logger.Debug("这条也不应该输出")
+	logger.Error("这条应该输出", FieldGroup{})
+	logger.Info("这条不应该输出", FieldGroup{})
+	logger.Debug("这条也不应该输出", FieldGroup{})
 }
 
 // ---------------------------------------------------------------------------
@@ -110,8 +110,8 @@ func TestWithField(t *testing.T) {
 	if !ok {
 		t.Fatal("类型断言失败")
 	}
-	if len(lgImpl.fields) != 0 {
-		t.Errorf("原始 logger fields 应为空，实际 %d", len(lgImpl.fields))
+	if lgImpl.fields.Len() != 0 {
+		t.Errorf("原始 logger fields 应为空，实际 %d", lgImpl.fields.Len())
 	}
 
 	// child 有 1 个字段
@@ -119,7 +119,7 @@ func TestWithField(t *testing.T) {
 	if !ok {
 		t.Fatal("类型断言失败")
 	}
-	if len(cl.fields) != 1 || cl.fields[0].Key != "service" {
+	if cl.fields.Len() != 1 || cl.fields.At(0).Key != "service" {
 		t.Errorf("child fields 不符预期：%+v", cl.fields)
 	}
 
@@ -128,8 +128,8 @@ func TestWithField(t *testing.T) {
 	if !ok {
 		t.Fatal("类型断言失败")
 	}
-	if len(gcl.fields) != 2 {
-		t.Errorf("grandchild fields 应为 2，实际 %d", len(gcl.fields))
+	if gcl.fields.Len() != 2 {
+		t.Errorf("grandchild fields 应为 2，实际 %d", gcl.fields.Len())
 	}
 }
 
@@ -191,8 +191,8 @@ func TestMultipleChannels(t *testing.T) {
 		t.Error("有一个通道启用 Debug 时 IsDebugEnabled 应为 true")
 	}
 
-	logger.Info("multi-channel info")
-	logger.Debug("multi-channel debug")
+	logger.Info("multi-channel info", FieldGroup{})
+	logger.Debug("multi-channel debug", FieldGroup{})
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +331,7 @@ func TestConcurrentLogging(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func(id int) {
 			for j := 0; j < messages; j++ {
-				logger.Info("concurrent log", Int("goroutine", id), Int("msg", j))
+				logger.Info("concurrent log", Fields(Int("goroutine", id), Int("msg", j)))
 			}
 			done <- struct{}{}
 		}(i)
@@ -352,7 +352,7 @@ func BenchmarkLogger_Info(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark", Int("i", i))
+		logger.Info("benchmark", Fields(Int("i", i)))
 	}
 }
 
@@ -381,7 +381,7 @@ func BenchmarkLogger_DisabledLevel(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.Debug("this should be filtered", Int("i", i))
+		logger.Debug("this should be filtered", Fields(Int("i", i)))
 	}
 }
 
@@ -423,14 +423,14 @@ func TestEntry_Context_NonNil(t *testing.T) {
 // TestMergeFields_BothNonEmpty 测试 logger 字段和方法字段均非空时的合并。
 func TestMergeFields_BothNonEmpty(t *testing.T) {
 	l := &logger{
-		fields: []Field{{Key: "svc", Value: "api"}},
+		fields: Fields(Field{Key: "svc", Value: "api"}),
 	}
-	methodFields := []Field{{Key: "tid", Value: "abc"}}
+	methodFields := Fields(Field{Key: "tid", Value: "abc"})
 	merged := l.mergeFields(methodFields)
-	if len(merged) != 2 {
-		t.Fatalf("merged length: got %d, want 2", len(merged))
+	if merged.Len() != 2 {
+		t.Fatalf("merged length: got %d, want 2", merged.Len())
 	}
-	if merged[0].Key != "svc" || merged[1].Key != "tid" {
+	if merged.At(0).Key != "svc" || merged.At(1).Key != "tid" {
 		t.Errorf("merge order wrong: %+v", merged)
 	}
 }
@@ -438,39 +438,35 @@ func TestMergeFields_BothNonEmpty(t *testing.T) {
 // TestMergeFields_LoggerOnly 测试仅 logger 有字段时直接返回 logger 字段。
 func TestMergeFields_LoggerOnly(t *testing.T) {
 	l := &logger{
-		fields: []Field{{Key: "svc", Value: "api"}},
+		fields: Fields(Field{Key: "svc", Value: "api"}),
 	}
-	merged := l.mergeFields(nil)
-	if len(merged) != 1 {
-		t.Fatalf("merged length: got %d, want 1", len(merged))
+	merged := l.mergeFields(FieldGroup{})
+	if merged.Len() != 1 {
+		t.Fatalf("merged length: got %d, want 1", merged.Len())
 	}
-	if merged[0].Key != "svc" {
-		t.Errorf("unexpected field: %+v", merged[0])
-	}
-}
-
-// TestCopyFields_NonEmpty 测试 copyFields 在 fields 非空时返回深拷贝。
-func TestCopyFields_NonEmpty(t *testing.T) {
-	l := &logger{
-		fields: []Field{{Key: "k", Value: "v"}},
-	}
-	copied := l.copyFields()
-	if len(copied) != 1 {
-		t.Fatalf("copyFields length: got %d, want 1", len(copied))
-	}
-	// 验证是深拷贝：修改原切片不影响拷贝
-	l.fields[0].Key = "modified"
-	if copied[0].Key != "k" {
-		t.Error("copyFields should return a deep copy")
+	if merged.At(0).Key != "svc" {
+		t.Errorf("unexpected field: %+v", merged.At(0))
 	}
 }
 
-// TestCopyFields_Empty 测试 copyFields 在 fields 为空时返回 nil。
-func TestCopyFields_Empty(t *testing.T) {
-	l := &logger{}
-	copied := l.copyFields()
-	if copied != nil {
-		t.Errorf("copyFields on empty should return nil, got %v", copied)
+// TestMergeFields_Overflow 测试合并字段超出内联容量（>8）时的 rest 分支。
+func TestMergeFields_Overflow(t *testing.T) {
+	var loggerFields FieldGroup
+	for i := 0; i < maxInlineFields; i++ {
+		loggerFields.appendField(Field{Key: fmt.Sprintf("base%d", i), Value: i})
+	}
+	l := &logger{fields: loggerFields}
+
+	methodFields := Fields(
+		Field{Key: "m0", Value: 0},
+		Field{Key: "m1", Value: 1},
+	)
+	merged := l.mergeFields(methodFields)
+	if merged.Len() != maxInlineFields+2 {
+		t.Fatalf("merged length: got %d, want %d", merged.Len(), maxInlineFields+2)
+	}
+	if merged.At(0).Key != "base0" || merged.At(maxInlineFields).Key != "m0" {
+		t.Errorf("merge order wrong: %+v", merged)
 	}
 }
 
@@ -563,7 +559,7 @@ func TestLogger_Panic(t *testing.T) {
 			t.Error("Panic should have panicked")
 		}
 	}()
-	logger.Panic("test panic")
+	logger.Panic("test panic", FieldGroup{})
 }
 
 // TestLogger_Panicf 测试 Panicf 方法会触发 panic。
@@ -629,7 +625,7 @@ func TestLogger_Warn_Structured(t *testing.T) {
 		t.Fatalf("Build failed: %v", err)
 	}
 	// 不 panic 即可
-	logger.Warn("warn msg", String("reason", "test"))
+	logger.Warn("warn msg", Fields(String("reason", "test")))
 }
 
 // TestLogger_WithField_Merge 测试 WithField 后 mergeFields 行为。
@@ -639,9 +635,9 @@ func TestLogger_WithField_Merge(t *testing.T) {
 
 	// child 调用 log 时，mergeFields 应合并 logger-level 和 method-level 字段
 	childImpl := child.(*logger)
-	merged := childImpl.mergeFields([]Field{{Key: "msg", Value: "hello"}})
-	if len(merged) != 2 {
-		t.Fatalf("expected 2 merged fields, got %d", len(merged))
+	merged := childImpl.mergeFields(Fields(Field{Key: "msg", Value: "hello"}))
+	if merged.Len() != 2 {
+		t.Fatalf("expected 2 merged fields, got %d", merged.Len())
 	}
 }
 
@@ -799,7 +795,7 @@ func TestLogger_Fatal(t *testing.T) {
 	}
 
 	logger, _ := NewBuilder().EnableConsole(InfoLevel).Build()
-	logger.Fatal("test fatal")
+	logger.Fatal("test fatal", FieldGroup{})
 
 	if !exited {
 		t.Error("Fatal should call osExit")
@@ -833,7 +829,7 @@ func TestLogger_Fatal_SyncError(t *testing.T) {
 	osExit = func(code int) { exited = true }
 
 	logger, _ := NewBuilder().EnableConsole(InfoLevel).Build()
-	logger.Fatal("test")
+	logger.Fatal("test", FieldGroup{})
 	if !exited {
 		t.Error("Fatal should call osExit even if sync fails")
 	}
@@ -1012,7 +1008,7 @@ func TestWithCaller_Enabled(t *testing.T) {
 		captured = e
 	}})
 
-	lg.Info("caller test")
+	lg.Info("caller test", FieldGroup{})
 	time.Sleep(30 * time.Millisecond)
 
 	if captured == nil {
@@ -1044,7 +1040,7 @@ func TestWithCaller_Disabled(t *testing.T) {
 		captured = e
 	}})
 
-	lg.Info("no caller")
+	lg.Info("no caller", FieldGroup{})
 	time.Sleep(30 * time.Millisecond)
 
 	if captured == nil {

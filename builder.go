@@ -384,7 +384,7 @@ func (b *Builder) Build() (Logger, error) {
 // logger 是 Logger 接口的默认实现，内部挂载多个 core。
 type logger struct {
 	cores      []*core
-	fields     []Field
+	fields     FieldGroup
 	ctx        context.Context
 	hooks      *hookManager
 	sampler    *sampler
@@ -404,29 +404,29 @@ func (l *logger) IsDebugEnabled() bool {
 
 // --- 结构化 API 实现 ---
 
-func (l *logger) Debug(msg string, fields ...Field) {
+func (l *logger) Debug(msg string, fields FieldGroup) {
 	l.log(DebugLevel, msg, fields)
 }
 
-func (l *logger) Info(msg string, fields ...Field) {
+func (l *logger) Info(msg string, fields FieldGroup) {
 	l.log(InfoLevel, msg, fields)
 }
 
-func (l *logger) Warn(msg string, fields ...Field) {
+func (l *logger) Warn(msg string, fields FieldGroup) {
 	l.log(WarnLevel, msg, fields)
 }
 
-func (l *logger) Error(msg string, fields ...Field) {
+func (l *logger) Error(msg string, fields FieldGroup) {
 	l.log(ErrorLevel, msg, fields)
 }
 
-func (l *logger) Panic(msg string, fields ...Field) {
+func (l *logger) Panic(msg string, fields FieldGroup) {
 	l.log(PanicLevel, msg, fields)
 	l.Sync()
 	panic(msg)
 }
 
-func (l *logger) Fatal(msg string, fields ...Field) {
+func (l *logger) Fatal(msg string, fields FieldGroup) {
 	l.log(FatalLevel, msg, fields)
 	l.Sync()
 	osExit(1)
@@ -435,29 +435,29 @@ func (l *logger) Fatal(msg string, fields ...Field) {
 // --- 格式化 API 实现 ---
 
 func (l *logger) Debugf(format string, args ...any) {
-	l.log(DebugLevel, fmt.Sprintf(format, args...), nil)
+	l.log(DebugLevel, fmt.Sprintf(format, args...), FieldGroup{})
 }
 
 func (l *logger) Infof(format string, args ...any) {
-	l.log(InfoLevel, fmt.Sprintf(format, args...), nil)
+	l.log(InfoLevel, fmt.Sprintf(format, args...), FieldGroup{})
 }
 
 func (l *logger) Warnf(format string, args ...any) {
-	l.log(WarnLevel, fmt.Sprintf(format, args...), nil)
+	l.log(WarnLevel, fmt.Sprintf(format, args...), FieldGroup{})
 }
 
 func (l *logger) Errorf(format string, args ...any) {
-	l.log(ErrorLevel, fmt.Sprintf(format, args...), nil)
+	l.log(ErrorLevel, fmt.Sprintf(format, args...), FieldGroup{})
 }
 
 func (l *logger) Panicf(format string, args ...any) {
-	l.log(PanicLevel, fmt.Sprintf(format, args...), nil)
+	l.log(PanicLevel, fmt.Sprintf(format, args...), FieldGroup{})
 	l.Sync()
 	panic(fmt.Sprintf(format, args...))
 }
 
 func (l *logger) Fatalf(format string, args ...any) {
-	l.log(FatalLevel, fmt.Sprintf(format, args...), nil)
+	l.log(FatalLevel, fmt.Sprintf(format, args...), FieldGroup{})
 	l.Sync()
 	osExit(1)
 }
@@ -467,7 +467,7 @@ func (l *logger) Fatalf(format string, args ...any) {
 func (l *logger) WithContext(ctx context.Context) Logger {
 	return &logger{
 		cores:      l.cores,
-		fields:     l.copyFields(),
+		fields:     l.fields,
 		ctx:        ctx,
 		hooks:      l.hooks,
 		sampler:    l.sampler,
@@ -477,19 +477,17 @@ func (l *logger) WithContext(ctx context.Context) Logger {
 }
 
 func (l *logger) WithField(key string, val any) Logger {
-	newFields := make([]Field, len(l.fields)+1)
-	copy(newFields, l.fields)
-	newFields[len(l.fields)] = Field{Key: key, Value: val}
-
-	return &logger{
+	nl := &logger{
 		cores:      l.cores,
-		fields:     newFields,
 		ctx:        l.ctx,
 		hooks:      l.hooks,
 		sampler:    l.sampler,
 		redacted:   l.redacted,
 		callerSkip: l.callerSkip,
 	}
+	nl.fields = l.fields
+	nl.fields.appendField(Field{Key: key, Value: val})
+	return nl
 }
 
 // SetLevel 动态调整日志级别。传入的所有 Level 中最低的一个将成为
@@ -569,19 +567,26 @@ func (l *logger) SafeExit(exitFunc func()) {
 // --- 内部方法 ---
 
 // log 是统一的日志写入入口。
-func (l *logger) log(level Level, msg string, fields []Field) {
+func (l *logger) log(level Level, msg string, fields FieldGroup) {
 	// 采样：超过每秒上限的日志直接丢弃
 	if l.sampler != nil && !l.sampler.allow() {
 		return
 	}
 
-	e := &Entry{
-		Level:   level,
-		Time:    time.Now(),
-		Message: msg,
-		Fields:  l.redactFields(l.mergeFields(fields)),
-		ctx:     l.ctx,
+	// Entry 复用：未注册 Hook 时，Entry 在本次调用内同步使用完即可归还；
+	// 注册 Hook 后 Hook 异步持有 Entry，必须每次独立分配。
+	var e *Entry
+	if l.hooks == nil {
+		e = getEntry()
+		defer putEntry(e)
+	} else {
+		e = &Entry{}
 	}
+	e.Level = level
+	e.Time = time.Now()
+	e.Message = msg
+	e.Fields = l.redactFields(l.mergeFields(fields))
+	e.ctx = l.ctx
 
 	// 调用者追踪：跳过 logx 自身和 Go runtime 栈帧，定位到业务调用代码
 	if l.callerSkip > 0 {
@@ -620,41 +625,50 @@ func (l *logger) log(level Level, msg string, fields []Field) {
 }
 
 // mergeFields 合并 logger 级别的 fields 和方法调用传入的 fields。
-func (l *logger) mergeFields(fields []Field) []Field {
-	if len(l.fields) == 0 {
+func (l *logger) mergeFields(fields FieldGroup) FieldGroup {
+	if l.fields.Len() == 0 {
 		return fields
 	}
-	merged := make([]Field, len(l.fields)+len(fields))
-	copy(merged, l.fields)
-	copy(merged[len(l.fields):], fields)
-	return merged
-}
-
-// copyFields 深拷贝 fields 切片。
-func (l *logger) copyFields() []Field {
-	if len(l.fields) == 0 {
-		return nil
+	var g FieldGroup
+	total := l.fields.Len() + fields.Len()
+	if total <= maxInlineFields {
+		for i := 0; i < l.fields.Len(); i++ {
+			g.arr[g.n] = l.fields.At(i)
+			g.n++
+		}
+		for i := 0; i < fields.Len(); i++ {
+			g.arr[g.n] = fields.At(i)
+			g.n++
+		}
+		return g
 	}
-	f := make([]Field, len(l.fields))
-	copy(f, l.fields)
-	return f
+	// 超出内联容量：按需分配（罕见）
+	merged := make([]Field, total)
+	for i := 0; i < l.fields.Len(); i++ {
+		merged[i] = l.fields.At(i)
+	}
+	for i := 0; i < fields.Len(); i++ {
+		merged[l.fields.Len()+i] = fields.At(i)
+	}
+	g.rest = merged
+	return g
 }
 
 // redactFields 将命中脱敏配置的字段值替换为 "***"。
-// 若未配置脱敏或没有字段，直接返回原切片，避免额外分配。
-func (l *logger) redactFields(fields []Field) []Field {
-	if len(l.redacted) == 0 || len(fields) == 0 {
+// 若未配置脱敏或没有字段，直接返回原值，避免额外分配。
+func (l *logger) redactFields(fields FieldGroup) FieldGroup {
+	if len(l.redacted) == 0 || fields.Len() == 0 {
 		return fields
 	}
-	out := make([]Field, len(fields))
-	for i, f := range fields {
+	var g FieldGroup
+	for i := 0; i < fields.Len(); i++ {
+		f := fields.At(i)
 		if _, ok := l.redacted[f.Key]; ok {
-			out[i] = Field{Key: f.Key, Value: "***"}
-			continue
+			f = Field{Key: f.Key, Value: "***"}
 		}
-		out[i] = f
+		g.appendField(f)
 	}
-	return out
+	return g
 }
 
 // isLogxInternal 判断函数是否属于 logx 库内部（logger 方法、core.write 等）。

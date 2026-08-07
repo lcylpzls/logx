@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+// defaultSlotSize 是异步写入槽位的默认容量。
+// 槽位由空闲通道复用，稳态下零分配；超长日志按需扩容。
+const defaultSlotSize = 4 * 1024
+
 // ---------------------------------------------------------------------------
 // FileAppender — 文件输出器
 // ---------------------------------------------------------------------------
@@ -38,10 +42,11 @@ type fileAppender struct {
 	symlinkPath   string // 软链接完整路径
 
 	// 异步模式专属字段
-	ch     chan []byte // 环形缓冲通道
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	writeCh chan []byte // 待写日志槽位
+	freeCh  chan []byte // 空闲槽位（复用，稳态零分配）
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 
 	closeOnce sync.Once
 	closed    int32 // atomic: 0=open, 1=closed
@@ -124,9 +129,14 @@ func newFileAppender(cfg *FileConfig) (Appender, error) {
 	// 创建统一的 context 用于控制所有后台协程
 	fa.ctx, fa.cancel = context.WithCancel(context.Background())
 
-	// 异步模式：启动后台刷盘协程
+	// 异步模式：槽位通道 + 后台刷盘协程
 	if fa.cfg.WriteMode == AsyncWriteMode {
-		fa.ch = make(chan []byte, fa.cfg.BufferSize)
+		fa.writeCh = make(chan []byte, fa.cfg.BufferSize)
+		fa.freeCh = make(chan []byte, fa.cfg.BufferSize)
+		// 预分配槽位：以固定内存换取运行时零分配（内存 ≈ BufferSize × 4KB）
+		for i := 0; i < fa.cfg.BufferSize; i++ {
+			fa.freeCh <- make([]byte, 0, defaultSlotSize)
+		}
 		fa.wg.Add(1)
 		go fa.runFlushLoop()
 	}
@@ -227,15 +237,33 @@ func (fa *fileAppender) appendSync(p []byte) (int, error) {
 // ---------------------------------------------------------------------------
 
 func (fa *fileAppender) appendAsync(p []byte) (int, error) {
-	// 拷贝数据（调用方可能复用缓冲区）
-	data := make([]byte, len(p))
-	copy(data, p)
+	// 从空闲槽池取槽；无空闲槽且写通道已满时丢弃，
+	// 否则新建槽位（首次/扩容，写盘后归还复用，稳态零分配）。
+	var data []byte
+	select {
+	case data = <-fa.freeCh:
+		data = data[:0]
+	default:
+		if len(fa.writeCh) >= cap(fa.writeCh) {
+			fa.dropped.Add(1)
+			if fa.cfg.OnDropped != nil {
+				fa.cfg.OnDropped()
+			}
+			return 0, nil
+		}
+		data = make([]byte, 0, defaultSlotSize)
+	}
+	if cap(data) < len(p) {
+		data = make([]byte, len(p)) // 超长日志（罕见）按需分配
+	}
+	data = append(data[:0], p...)
 
 	select {
-	case fa.ch <- data:
+	case fa.writeCh <- data:
 		return len(p), nil
 	default:
-		// 通道满，丢弃此条日志（异步模式的权衡），并记录丢弃指标
+		// 写通道满（并发竞态防御）：归还槽位并丢弃
+		fa.recycleSlot(data)
 		fa.dropped.Add(1)
 		if fa.cfg.OnDropped != nil {
 			fa.cfg.OnDropped()
@@ -256,17 +284,15 @@ func (fa *fileAppender) runFlushLoop() {
 		if buf.Len() == 0 {
 			return
 		}
-		data := make([]byte, buf.Len())
-		copy(data, buf.Bytes())
-		buf.Reset()
 
 		fa.mu.Lock()
-		if err := fa.checkRotation(len(data)); err != nil {
+		if err := fa.checkRotation(buf.Len()); err != nil {
 			fa.reportError(fmt.Errorf("异步刷盘轮转失败：%w", err))
+			buf.Reset()
 			fa.mu.Unlock()
 			return
 		}
-		n, err := fa.file.Write(data)
+		n, err := fa.file.Write(buf.Bytes())
 		if err == nil {
 			fa.currentSize += int64(n)
 			fa.written.Add(1)
@@ -274,6 +300,7 @@ func (fa *fileAppender) runFlushLoop() {
 		} else {
 			fa.reportError(fmt.Errorf("异步刷盘写入失败：%w", err))
 		}
+		buf.Reset()
 		fa.mu.Unlock()
 	}
 
@@ -285,8 +312,9 @@ func (fa *fileAppender) runFlushLoop() {
 			flush()
 			return
 
-		case data := <-fa.ch:
+		case data := <-fa.writeCh:
 			buf.Write(data)
+			fa.recycleSlot(data)
 			// 达到批量大小阈值时立即刷盘
 			if buf.Len() >= 64*1024 { // 64KB 批量阈值
 				flush()
@@ -298,12 +326,13 @@ func (fa *fileAppender) runFlushLoop() {
 	}
 }
 
-// drainPending 将通道中残留的数据全部写入本地批量缓冲（不落盘）。
+// drainPending 将写通道中残留的数据全部写入本地批量缓冲（不落盘），并归还槽位。
 func (fa *fileAppender) drainPending(buf *bytes.Buffer) {
 	for {
 		select {
-		case data := <-fa.ch:
+		case data := <-fa.writeCh:
 			buf.Write(data)
+			fa.recycleSlot(data)
 		default:
 			return
 		}
@@ -314,10 +343,11 @@ func (fa *fileAppender) drainPending(buf *bytes.Buffer) {
 func (fa *fileAppender) drainAsync() {
 	for {
 		select {
-		case data := <-fa.ch:
+		case data := <-fa.writeCh:
 			fa.mu.Lock()
 			if err := fa.checkRotation(len(data)); err != nil {
 				fa.reportError(fmt.Errorf("关闭排空轮转失败：%w", err))
+				fa.recycleSlot(data)
 				fa.mu.Unlock()
 				continue
 			}
@@ -329,6 +359,7 @@ func (fa *fileAppender) drainAsync() {
 			} else {
 				fa.reportError(fmt.Errorf("关闭排空写入失败：%w", err))
 			}
+			fa.recycleSlot(data)
 			fa.mu.Unlock()
 		default:
 			return
@@ -344,11 +375,13 @@ func (fa *fileAppender) syncAsync() error {
 	// 排空通道
 	for {
 		select {
-		case data := <-fa.ch:
+		case data := <-fa.writeCh:
 			if err := fa.checkRotation(len(data)); err != nil {
+				fa.recycleSlot(data)
 				return err
 			}
 			n, err := fa.file.Write(data)
+			fa.recycleSlot(data)
 			if err != nil {
 				return err
 			}
@@ -360,6 +393,15 @@ func (fa *fileAppender) syncAsync() error {
 			}
 			return nil
 		}
+	}
+}
+
+// recycleSlot 将槽位归还空闲池。池满时丢弃该槽位（由 GC 回收），
+// 绝不在热路径上阻塞——并发新建槽位可能导致池容量瞬时不足，阻塞会引发死锁。
+func (fa *fileAppender) recycleSlot(data []byte) {
+	select {
+	case fa.freeCh <- data:
+	default:
 	}
 }
 

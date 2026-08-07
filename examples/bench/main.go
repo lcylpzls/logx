@@ -28,7 +28,7 @@ func main() {
 				logx.WithLogDir(dir),
 				logx.WithFilename("bench.log"),
 				logx.WithWriteMode(logx.AsyncWriteMode),
-				logx.WithBufferSize(65536),
+				logx.WithBufferSize(4096),
 				logx.WithFlushInterval(100*time.Millisecond),
 				logx.WithLevels(logx.InfoLevel),
 			).
@@ -60,7 +60,7 @@ func main() {
 				logx.WithLogDir(dir),
 				logx.WithFilename("bench.log"),
 				logx.WithWriteMode(logx.AsyncWriteMode),
-				logx.WithBufferSize(65536),
+				logx.WithBufferSize(4096),
 				logx.WithFlushInterval(100*time.Millisecond),
 				logx.WithLevels(logx.InfoLevel),
 			).
@@ -118,7 +118,7 @@ func bench(name string, factory func() logx.Logger) {
 	start := time.Now()
 	deadline := start.Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		logger.Info("benchmark message")
+		logger.Info("benchmark message", logx.FieldGroup{})
 		count.Add(1)
 	}
 	elapsed := time.Since(start)
@@ -157,11 +157,11 @@ func benchFields(name string, factory func() logx.Logger) {
 	start := time.Now()
 	deadline := start.Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		logger.Info("benchmark message",
+		logger.Info("benchmark message", logx.Fields(
 			logx.Int("id", int(count.Load())),
 			logx.String("status", "ok"),
 			logx.Bool("cached", true),
-		)
+		))
 		count.Add(1)
 	}
 	elapsed := time.Since(start)
@@ -208,12 +208,12 @@ func benchMute(name string, factory func() logx.Logger) {
 
 	if name == "未启用级别过滤" {
 		for time.Now().Before(deadline) {
-			logger.Debug("this will be filtered")
+			logger.Debug("this will be filtered", logx.FieldGroup{})
 			count.Add(1)
 		}
 	} else {
 		for time.Now().Before(deadline) {
-			logger.Info("benchmark message")
+			logger.Info("benchmark message", logx.FieldGroup{})
 			count.Add(1)
 		}
 	}

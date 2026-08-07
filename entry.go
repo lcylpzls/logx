@@ -2,6 +2,7 @@ package logx
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -13,8 +14,8 @@ type Entry struct {
 	Time time.Time
 	// Message 日志正文
 	Message string
-	// Fields 结构化字段列表
-	Fields []Field
+	// Fields 结构化字段（内联容器，热路径零分配）
+	Fields FieldGroup
 	// CallerFile 调用者源文件名（WithCaller 启用后填充）
 	CallerFile string
 	// CallerLine 调用者行号（WithCaller 启用后填充）
@@ -29,4 +30,23 @@ func (e *Entry) Context() context.Context {
 		return context.Background()
 	}
 	return e.ctx
+}
+
+// entryPool 复用 Entry 对象，减少高频日志路径的内存分配。
+// 注意：仅当 Logger 未注册 Hook 时启用复用（Hook 会异步持有 Entry）。
+var entryPool = sync.Pool{
+	New: func() any {
+		return &Entry{}
+	},
+}
+
+// getEntry 从池中获取一个 Entry。
+func getEntry() *Entry {
+	return entryPool.Get().(*Entry)
+}
+
+// putEntry 将 Entry 清零后归还池中，避免脏数据泄漏到下一次复用。
+func putEntry(e *Entry) {
+	*e = Entry{}
+	entryPool.Put(e)
 }

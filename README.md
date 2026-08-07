@@ -30,7 +30,7 @@ func main() {
         EnableConsole(logx.InfoLevel).
         Build()
 
-    logger.Info("服务启动成功", logx.Int("port", 8080))
+    logger.Info("服务启动成功", logx.Fields(logx.Int("port", 8080)))
 }
 ```
 
@@ -44,9 +44,9 @@ func main() {
 
 ## 核心特性
 
-- ⚡ **零分配编码** — 2MB 缓冲池 + 预编码常量 + 时间缓存，单条日志 **0 B/op, 0 allocs**
+- ⚡ **全链路零分配** — 2MB 缓冲池 + Entry 池化 + 内联字段容器 + 异步槽位复用，控制台/同步文件/异步文件路径均实测 **0 allocs/op**
 - 🔌 **可插拔架构** — Encoder / Appender 接口完全解耦，支持自定义扩展
-- 📝 **双模式 API** — 同时支持结构化字段（`Info("msg", logx.Int("k", v))`）和传统格式化（`Infof("k=%d", v)`）
+- 📝 **双模式 API** — 同时支持结构化字段（`Info("msg", logx.Fields(logx.Int("k", v)))`）和传统格式化（`Infof("k=%d", v)`）
 - 🎨 **控制台色彩** — 按级别高亮（Debug 蓝 / Info 绿 / Warn 黄 / Error 红），落盘自动剥离
 - 📁 **工业级文件管理** — 原子切割（大小+时间）、Symlink 软链接、Gzip 压缩、自动清理
 - ⚙️ **双引擎写入** — 异步批量（高吞吐）与绝对同步（强可靠）随意切换
@@ -94,17 +94,17 @@ defer logger.Close()
 
 ```go
 // 结构化 API（零反射，推荐）
-logger.Info("用户登录", logx.String("user", "admin"), logx.Int("attempt", 3))
-logger.Debug("SQL 查询", logx.String("sql", "SELECT * FROM users"), logx.Int64("elapsed_ms", 12))
-logger.Error("连接失败", logx.Err(err))
+logger.Info("用户登录", logx.Fields(logx.String("user", "admin"), logx.Int("attempt", 3)))
+logger.Debug("SQL 查询", logx.Fields(logx.String("sql", "SELECT * FROM users"), logx.Int64("elapsed_ms", 12)))
+logger.Error("连接失败", logx.Fields(logx.Err(err)))
 
 // 格式化 API
 logger.Infof("第 %d 次重试", retry)
 logger.Errorf("处理失败：%v", err)
 
 // 特殊级别
-logger.Panic("不可恢复的错误")  // 刷盘后触发 panic
-logger.Fatal("致命错误")       // 刷盘后 os.Exit(1)
+logger.Panic("不可恢复的错误", logx.FieldGroup{})  // 刷盘后触发 panic
+logger.Fatal("致命错误", logx.FieldGroup{})       // 刷盘后 os.Exit(1)
 ```
 
 ### 3. 结构化字段
@@ -123,9 +123,9 @@ logx.Any("data", myStruct)       // 任意类型（后备方案）
 当 Debug 未开启时，避免执行昂贵的计算：
 
 ```go
-logger.Debug("用户详情", logx.Lazy("info", func() any {
+logger.Debug("用户详情", logx.Fields(logx.Lazy("info", func() any {
     return expensiveDBQuery()  // 仅在 Debug 启用时才执行
-}))
+})))
 ```
 
 ### 5. 派生 Logger
@@ -137,7 +137,7 @@ traceLogger := logger.WithContext(ctx)
 
 // 固定字段
 userLogger := logger.WithField("user_id", "10086")
-userLogger.Info("操作成功") // 自动携带 user_id=10086
+userLogger.Info("操作成功", logx.FieldGroup{}) // 自动携带 user_id=10086
 ```
 
 ### 6. 写入模式
@@ -184,7 +184,7 @@ logger, _ := logx.NewBuilder().
     ).
     Build()
 
-logger.Info("服务启动")
+logger.Info("服务启动", logx.FieldGroup{})
 // 输出：2026-06-06 15:04:05.000 INFO  main.go:15  服务启动
 ```
 
@@ -303,24 +303,27 @@ logger.Sync() // 先刷盘再退出
 
 ## 性能基准
 
-> 测试环境：Go 1.21+, 单条日志含时间 + 级别 + 消息 + 3 个字段
+> 实测环境：AMD Ryzen 5 7600 / Windows / Go 1.26.5；单条日志含时间 + 级别 + 消息 + 3 个字段
 
 ### 微基准
 
 | 指标 | logx | 说明 |
 |------|:--:|------|
-| TextEncoder 简单日志 | **18.6 ns/op, 0 B, 0 allocs** | 零分配纯字节拼接 |
-| TextEncoder 含字段 | **40.5 ns/op, 0 B, 0 allocs** | 无反射类型分发 |
-| 未启用级别过滤 | **52.7 ns/op** | 仅级别判断开销 |
+| TextEncoder 简单日志（编码路径） | **17.9 ns/op, 0 B, 0 allocs** | 零分配纯字节拼接 |
+| TextEncoder 含字段（编码路径） | **40.2 ns/op, 0 B, 0 allocs** | 无反射类型分发 |
+| 端到端（io.Discard，3 字段） | **147 ns/op, 0 B, 0 allocs** | Entry 池化 + 内联字段容器 |
+| 文件异步写入（3 字段） | **249 ns/op, 0 allocs** | 槽位复用，稳态零分配 |
+| 文件同步写入（3 字段） | **3206 ns/op, 0 allocs** | 直接落盘 |
+| 未启用级别过滤 | **72 ns/op, 0 allocs** | 仅级别判断开销 |
 
 ### 吞吐量（`examples/bench`）
 
 | 场景 | 吞吐量 |
 |------|--:|
-| 文件异步写入 | **4,003,544 条/s** |
-| 文件同步写入 | 402,047 条/s |
-| 文件异步 + 3 字段 | 2,669,233 条/s |
-| 未启用级别过滤 | **24,793,070 条/s** |
+| 文件异步写入 | **4,583,589 条/s** |
+| 文件同步写入 | 373,856 条/s |
+| 文件异步 + 3 字段 | 3,122,028 条/s |
+| 未启用级别过滤 | **13,774,303 条/s** |
 
 ---
 

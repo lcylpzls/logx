@@ -294,7 +294,7 @@ func TestBuilder_FileLog(t *testing.T) {
 	}
 	defer logger.Close()
 
-	logger.Info("integration test", String("key", "val"))
+	logger.Info("integration test", Fields(String("key", "val")))
 	logger.Sync()
 
 	// 验证文件存在

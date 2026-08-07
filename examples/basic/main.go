@@ -11,7 +11,7 @@ func main() {
 		panic(err)
 	}
 
-	logger.Info("Hello, logx!")
-	logger.Info("结构化字段", logx.String("user", "admin"), logx.Int("port", 8080))
+	logger.Info("Hello, logx!", logx.FieldGroup{})
+	logger.Info("结构化字段", logx.Fields(logx.String("user", "admin"), logx.Int("port", 8080)))
 	logger.Infof("格式化输出：服务运行在第 %d 端口", 8080)
 }

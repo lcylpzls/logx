@@ -2,7 +2,9 @@ package main
 
 import (
 	"io"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/lcylpzls/logx"
 	"github.com/sirupsen/logrus"
@@ -24,11 +26,11 @@ func BenchmarkLogx(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark message",
+		logger.Info("benchmark message", logx.Fields(
 			logx.String("user", "admin"),
 			logx.Int("attempt", 3),
 			logx.Bool("ok", true),
-		)
+		))
 	}
 }
 
@@ -68,5 +70,65 @@ func BenchmarkLogrus(b *testing.B) {
 			"attempt": 3,
 			"ok":      true,
 		}).Info("benchmark message")
+	}
+}
+
+// BenchmarkLogxAsyncFile 测 logx 文件异步写入路径（槽位复用，稳态应零分配）。
+func BenchmarkLogxAsyncFile(b *testing.B) {
+	dir, err := os.MkdirTemp("", "logx-bench-async-*")
+	if err != nil {
+		b.Fatalf("创建临时目录失败：%v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	logger, err := logx.NewBuilder().
+		EnableFileLog(
+			logx.WithLogDir(dir),
+			logx.WithFilename("bench.log"),
+			logx.WithWriteMode(logx.AsyncWriteMode),
+			logx.WithBufferSize(4096),
+			logx.WithFlushInterval(50*time.Millisecond),
+			logx.WithLevels(logx.InfoLevel),
+		).
+		Build()
+	if err != nil {
+		b.Fatalf("Build 失败：%v", err)
+	}
+	defer logger.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("benchmark message", logx.Fields(logx.Int("i", i)))
+	}
+	b.StopTimer()
+	if err := logger.Sync(); err != nil {
+		b.Fatalf("Sync 失败：%v", err)
+	}
+}
+
+// BenchmarkLogxSyncFile 测 logx 文件同步写入路径（应零分配）。
+func BenchmarkLogxSyncFile(b *testing.B) {
+	dir, err := os.MkdirTemp("", "logx-bench-sync-*")
+	if err != nil {
+		b.Fatalf("创建临时目录失败：%v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	logger, err := logx.NewBuilder().
+		EnableFileLog(
+			logx.WithLogDir(dir),
+			logx.WithFilename("bench.log"),
+			logx.WithWriteMode(logx.SyncWriteMode),
+			logx.WithLevels(logx.InfoLevel),
+		).
+		Build()
+	if err != nil {
+		b.Fatalf("Build 失败：%v", err)
+	}
+	defer logger.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("benchmark message", logx.Fields(logx.Int("i", i)))
 	}
 }

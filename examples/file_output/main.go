@@ -29,6 +29,6 @@ func main() {
 	}
 	defer logger.Close()
 
-	logger.Info("文件日志示例", logx.Int("pid", os.Getpid()))
+	logger.Info("文件日志示例", logx.Fields(logx.Int("pid", os.Getpid())))
 	logger.Infof("日志目录：%s", logDir)
 }

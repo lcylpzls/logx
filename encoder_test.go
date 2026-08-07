@@ -15,10 +15,10 @@ func TestTextEncoder_Format(t *testing.T) {
 	entry := &Entry{
 		Level:   InfoLevel,
 		Message: "hello world",
-		Fields: []Field{
-			{Key: "user", Value: "admin"},
-			{Key: "count", Value: 42},
-		},
+		Fields: Fields(
+			Field{Key: "user", Value: "admin"},
+			Field{Key: "count", Value: 42},
+		),
 	}
 
 	buf := getBuffer()
@@ -91,11 +91,11 @@ func BenchmarkTextEncoder_WithFields(b *testing.B) {
 	entry := &Entry{
 		Level:   InfoLevel,
 		Message: "benchmark message",
-		Fields: []Field{
-			{Key: "user", Value: "admin"},
-			{Key: "count", Value: 42},
-			{Key: "enabled", Value: true},
-		},
+		Fields: Fields(
+			Field{Key: "user", Value: "admin"},
+			Field{Key: "count", Value: 42},
+			Field{Key: "enabled", Value: true},
+		),
 	}
 
 	b.ResetTimer()
@@ -232,7 +232,7 @@ func TestTextEncoder_ColorOutput(t *testing.T) {
 	entry := &Entry{
 		Level:   WarnLevel,
 		Message: "warning",
-		Fields:  []Field{{Key: "code", Value: "W001"}},
+		Fields:  Fields(Field{Key: "code", Value: "W001"}),
 	}
 
 	buf := getBuffer()

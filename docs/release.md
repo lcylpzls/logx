@@ -4,7 +4,7 @@
 
 - 遵循语义化版本（SemVer）：`vMAJOR.MINOR.PATCH`；
 - **v1.0.0 起冻结 API**：破坏性变更必须提升主版本（v2.0.0），升级前查看 CHANGELOG；
-- v1.0.0（2026-08-08）为 API 冻结基线，建议用 apidiff 保存 API 快照以便后续自动检测破坏。
+- v1.0.0（2026-08-08）为 API 冻结基线，导出符号见 `api-v1.0.0.md`；后续可用 `golang.org/x/exp/cmd/apidiff` 对比版本检测破坏。
 
 ## 2. 发布流程
 

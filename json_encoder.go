@@ -68,7 +68,7 @@ func (e *jsonEncoder) Encode(buf *Buffer, entry *Entry) error {
 		buf.B = append(buf.B, ',')
 		appendJSONString(buf, f.Key)
 		buf.B = append(buf.B, ':')
-		e.appendFieldValue(buf, f.Value)
+		e.appendField(buf, f)
 	}
 
 	buf.B = append(buf.B, jsonLineEnd...)
@@ -92,6 +92,20 @@ func jsonLevelName(l Level) []byte {
 		return jsonLevelFatal
 	default:
 		return jsonLevelOff
+	}
+}
+
+// appendField 将字段值追加为 JSON。常用类型走类型化槽位（零装箱分配）。
+func (e *jsonEncoder) appendField(buf *Buffer, f Field) {
+	switch f.typ {
+	case fieldString:
+		appendJSONString(buf, f.str)
+	case fieldInt, fieldInt64:
+		buf.B = strconv.AppendInt(buf.B, f.i64, 10)
+	case fieldBool:
+		buf.B = strconv.AppendBool(buf.B, f.b)
+	default:
+		e.appendFieldValue(buf, f.Value)
 	}
 }
 

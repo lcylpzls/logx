@@ -52,30 +52,46 @@ func (g *FieldGroup) appendField(f Field) {
 	g.rest = append(g.rest, f)
 }
 
+// fieldType 标识 Field 的类型化存储槽位。
+type fieldType uint8
+
+const (
+	fieldAny fieldType = iota // 兜底：使用 Value 接口（Any/Err/Lazy/手动构造）
+	fieldString
+	fieldInt
+	fieldInt64
+	fieldBool
+)
+
 // Field 表示一个结构化的键值对日志字段。
+// 常用类型直接存储在类型化槽位中，避免变量装箱分配；Value 仅作兜底。
 type Field struct {
 	Key   string
-	Value interface{}
+	typ   fieldType
+	str   string
+	i64   int64
+	b     bool
+	Value any
 }
 
 // String 构造一个字符串字段。
 func String(key string, val string) Field {
-	return Field{Key: key, Value: val}
+	return Field{Key: key, typ: fieldString, str: val}
 }
 
 // Int 构造一个整数字段。
 func Int(key string, val int) Field {
-	return Field{Key: key, Value: val}
+	return Field{Key: key, typ: fieldInt, i64: int64(val)}
 }
 
 // Int64 构造一个 int64 字段。
 func Int64(key string, val int64) Field {
-	return Field{Key: key, Value: val}
+	return Field{Key: key, typ: fieldInt64, i64: val}
 }
 
 // Bool 构造一个布尔字段。
 func Bool(key string, val bool) Field {
-	return Field{Key: key, Value: val}
+	return Field{Key: key, typ: fieldBool, b: val}
 }
 
 // Any 构造一个任意类型字段。

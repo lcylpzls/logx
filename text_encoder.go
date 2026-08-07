@@ -72,13 +72,28 @@ func (e *textEncoder) Encode(buf *Buffer, entry *Entry) error {
 			}
 			buf.B = append(buf.B, f.Key...)
 			buf.B = append(buf.B, '=')
-			e.appendFieldValue(buf, f.Value)
+			e.appendField(buf, f)
 		}
 		buf.B = append(buf.B, '}')
 	}
 
 	buf.B = append(buf.B, '\n')
 	return nil
+}
+
+// appendField 将字段值追加到缓冲区。常用类型走类型化槽位（零装箱分配），
+// 其余类型回退到 appendFieldValue。
+func (e *textEncoder) appendField(buf *Buffer, f Field) {
+	switch f.typ {
+	case fieldString:
+		buf.B = append(buf.B, f.str...)
+	case fieldInt, fieldInt64:
+		buf.B = strconv.AppendInt(buf.B, f.i64, 10)
+	case fieldBool:
+		buf.B = strconv.AppendBool(buf.B, f.b)
+	default:
+		e.appendFieldValue(buf, f.Value)
+	}
 }
 
 // appendFieldValue 将字段值直接追加到缓冲区，针对常见类型零分配。

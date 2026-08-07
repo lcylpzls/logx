@@ -237,39 +237,17 @@ func (fa *fileAppender) appendSync(p []byte) (int, error) {
 // ---------------------------------------------------------------------------
 
 func (fa *fileAppender) appendAsync(p []byte) (int, error) {
-	// 从空闲槽池取槽；无空闲槽且写通道已满时丢弃，
-	// 否则新建槽位（首次/扩容，写盘后归还复用，稳态零分配）。
-	var data []byte
-	select {
-	case data = <-fa.freeCh:
-		data = data[:0]
-	default:
-		if len(fa.writeCh) >= cap(fa.writeCh) {
-			fa.dropped.Add(1)
-			if fa.cfg.OnDropped != nil {
-				fa.cfg.OnDropped()
-			}
-			return 0, nil
-		}
-		data = make([]byte, 0, defaultSlotSize)
-	}
+	// 有界背压：无空闲槽时阻塞等待消费者归还，保证稳态零分配、零丢弃。
+	// 槽位守恒（预填 BufferSize 个，写盘后归还）保证发送方永不阻塞。
+	data := <-fa.freeCh
+	data = data[:0]
 	if cap(data) < len(p) {
-		data = make([]byte, len(p)) // 超长日志（罕见）按需分配
+		// 超长日志（罕见）：按需分配新槽位，旧小槽由 GC 回收
+		data = make([]byte, len(p))
 	}
 	data = append(data[:0], p...)
-
-	select {
-	case fa.writeCh <- data:
-		return len(p), nil
-	default:
-		// 写通道满（并发竞态防御）：归还槽位并丢弃
-		fa.recycleSlot(data)
-		fa.dropped.Add(1)
-		if fa.cfg.OnDropped != nil {
-			fa.cfg.OnDropped()
-		}
-		return 0, nil
-	}
+	fa.writeCh <- data
+	return len(p), nil
 }
 
 // runFlushLoop 后台批量刷盘协程。

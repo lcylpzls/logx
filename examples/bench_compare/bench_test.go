@@ -132,3 +132,36 @@ func BenchmarkLogxSyncFile(b *testing.B) {
 		logger.Info("benchmark message", logx.Fields(logx.Int("i", i)))
 	}
 }
+
+// BenchmarkLogxAsyncFileConst 对照基准：字段用常量，用于定位异步路径的分配来源。
+func BenchmarkLogxAsyncFileConst(b *testing.B) {
+	dir, err := os.MkdirTemp("", "logx-bench-async-c-*")
+	if err != nil {
+		b.Fatalf("创建临时目录失败：%v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	logger, err := logx.NewBuilder().
+		EnableFileLog(
+			logx.WithLogDir(dir),
+			logx.WithFilename("bench.log"),
+			logx.WithWriteMode(logx.AsyncWriteMode),
+			logx.WithBufferSize(4096),
+			logx.WithFlushInterval(50*time.Millisecond),
+			logx.WithLevels(logx.InfoLevel),
+		).
+		Build()
+	if err != nil {
+		b.Fatalf("Build 失败：%v", err)
+	}
+	defer logger.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("benchmark message", logx.Fields(logx.Int("i", 1)))
+	}
+	b.StopTimer()
+	if err := logger.Sync(); err != nil {
+		b.Fatalf("Sync 失败：%v", err)
+	}
+}

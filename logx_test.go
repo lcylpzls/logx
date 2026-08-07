@@ -251,22 +251,22 @@ func TestIsLevelEnabled(t *testing.T) {
 // ---------------------------------------------------------------------------
 func TestFieldConstructors(t *testing.T) {
 	s := String("key", "val")
-	if s.Key != "key" || s.Value != "val" {
+	if s.Key != "key" || s.typ != fieldString || s.str != "val" {
 		t.Errorf("String field: %+v", s)
 	}
 
 	i := Int("count", 42)
-	if i.Key != "count" || i.Value != 42 {
+	if i.Key != "count" || i.typ != fieldInt || i.i64 != 42 {
 		t.Errorf("Int field: %+v", i)
 	}
 
 	i64 := Int64("size", 1<<30)
-	if i64.Key != "size" || i64.Value != int64(1<<30) {
+	if i64.Key != "size" || i64.typ != fieldInt64 || i64.i64 != int64(1<<30) {
 		t.Errorf("Int64 field: %+v", i64)
 	}
 
 	b := Bool("enabled", true)
-	if b.Key != "enabled" || b.Value != true {
+	if b.Key != "enabled" || b.typ != fieldBool || !b.b {
 		t.Errorf("Bool field: %+v", b)
 	}
 

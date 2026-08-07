@@ -144,12 +144,16 @@ func TestJSONEncoder_FieldTypes(t *testing.T) {
 			Any("i8", int8(-8)),
 			Any("i16", int16(-16)),
 			Any("i32", int32(-32)),
+			Any("plain_int", int(7)),
+			Any("plain_i64", int64(77)),
 			Any("u", uint(7)),
 			Any("u8", uint8(8)),
 			Any("u16", uint16(16)),
 			Any("u32", uint32(32)),
 			Any("u64", uint64(64)),
 			Any("f32", float32(1.5)),
+			Any("f64", float64(2.5)),
+			Any("plain_bool", true),
 			Any("t", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 			Any("d", 3*time.Second),
 			Any("struct", struct{ A int }{1}),
@@ -168,6 +172,32 @@ func TestJSONEncoder_FieldTypes(t *testing.T) {
 	}
 	if out["t"] != "2026-01-02T03:04:05Z" || out["d"] != "3s" || out["struct"] != "{1}" {
 		t.Errorf("特殊字段不符：%v", out)
+	}
+}
+
+func TestTextEncoder_TypedFields(t *testing.T) {
+	buf := getBuffer()
+	defer putBuffer(buf)
+
+	err := newTextEncoder(false).Encode(buf, &Entry{
+		Level:   InfoLevel,
+		Time:    time.Now(),
+		Message: "typed",
+		Fields: Fields(
+			String("s", "v"),
+			Int("i", 42),
+			Int64("i64", 43),
+			Bool("b", true),
+		),
+	})
+	if err != nil {
+		t.Fatalf("Encode 失败：%v", err)
+	}
+	out := string(buf.B)
+	for _, want := range []string{"s=v", "i=42", "i64=43", "b=true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("输出缺少 %s：%s", want, out)
+		}
 	}
 }
 
@@ -605,31 +635,43 @@ func TestCore_ReportWriteError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 丢弃计数
+// 有界背压（异步槽位复用）
 // ---------------------------------------------------------------------------
 
-func TestAppendAsync_DropCountAndCallback(t *testing.T) {
-	dropped := 0
+func TestAppendAsync_Backpressure(t *testing.T) {
 	fa := &fileAppender{
 		writeCh: make(chan []byte, 1),
 		freeCh:  make(chan []byte, 1),
-		cfg: FileConfig{
-			OnDropped: func() { dropped++ },
-		},
+		cfg:     FileConfig{},
 	}
 
-	if _, err := fa.appendAsync([]byte("first")); err != nil {
-		t.Fatalf("首次写入失败：%v", err)
-	}
-	if _, err := fa.appendAsync([]byte("second")); err != nil {
-		t.Fatalf("第二次写入失败：%v", err)
+	done := make(chan struct{})
+	go func() {
+		fa.appendAsync([]byte("x"))
+		close(done)
+	}()
+
+	// 无空闲槽时应阻塞（背压），而非丢弃或分配新槽
+	select {
+	case <-done:
+		t.Fatal("无空闲槽时不应立即返回")
+	case <-time.After(50 * time.Millisecond):
 	}
 
-	if dropped != 1 {
-		t.Errorf("丢弃回调次数不符：got %d, want 1", dropped)
+	fa.freeCh <- make([]byte, 0, 64)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("槽位可用后 appendAsync 应完成")
 	}
-	if m := fa.Metrics(); m.Drops != 1 {
-		t.Errorf("丢弃计数不符：got %d, want 1", m.Drops)
+
+	select {
+	case data := <-fa.writeCh:
+		if string(data) != "x" {
+			t.Errorf("写入内容不符：%q", data)
+		}
+	default:
+		t.Fatal("日志未进入写通道")
 	}
 }
 
@@ -690,29 +732,6 @@ func TestFieldGroup_AppendAllocatesRest(t *testing.T) {
 	}
 	if g.At(maxInlineFields).Key != "overflow" {
 		t.Error("溢出字段不在末尾")
-	}
-}
-
-func TestAppendAsync_WriteChannelFull(t *testing.T) {
-	dropped := 0
-	fa := &fileAppender{
-		writeCh: make(chan []byte, 1),
-		freeCh:  make(chan []byte, 1),
-		cfg: FileConfig{
-			OnDropped: func() { dropped++ },
-		},
-	}
-	fa.writeCh <- []byte("occupied")
-	fa.freeCh <- make([]byte, 0, 64)
-
-	if _, err := fa.appendAsync([]byte("overflow")); err != nil {
-		t.Fatalf("appendAsync 失败：%v", err)
-	}
-	if dropped != 1 {
-		t.Errorf("丢弃回调未触发：%d", dropped)
-	}
-	if m := fa.Metrics(); m.Drops != 1 {
-		t.Errorf("丢弃计数不符：%d", m.Drops)
 	}
 }
 

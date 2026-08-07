@@ -1,0 +1,16 @@
+devlogs/
+.agents/
+.idea/
+.vscode/
+.trae/
+.gitignore
+.claude/
+CLAUDE.md
+coverage.out
+/AGENTS.md
+*.exe
+.git/
+git_push.sh
+
+# Example runtime output
+logx-example-*

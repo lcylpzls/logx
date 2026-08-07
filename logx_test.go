@@ -1002,15 +1002,20 @@ func TestWithCaller_Enabled(t *testing.T) {
 	}
 
 	lgImpl := lg.(*logger)
-	var captured *Entry
+	capturedCh := make(chan *Entry, 1)
 	lgImpl.hooks = newHookManager()
 	lgImpl.hooks.add(&captureHook{fn: func(e *Entry) {
-		captured = e
+		capturedCh <- e
 	}})
 
 	lg.Info("caller test", FieldGroup{})
-	time.Sleep(30 * time.Millisecond)
 
+	var captured *Entry
+	select {
+	case captured = <-capturedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Hook 未捕获到 Entry")
+	}
 	if captured == nil {
 		t.Fatal("Hook 未捕获到 Entry")
 	}
@@ -1034,15 +1039,20 @@ func TestWithCaller_Disabled(t *testing.T) {
 	}
 
 	lgImpl := lg.(*logger)
-	var captured *Entry
+	capturedCh := make(chan *Entry, 1)
 	lgImpl.hooks = newHookManager()
 	lgImpl.hooks.add(&captureHook{fn: func(e *Entry) {
-		captured = e
+		capturedCh <- e
 	}})
 
 	lg.Info("no caller", FieldGroup{})
-	time.Sleep(30 * time.Millisecond)
 
+	var captured *Entry
+	select {
+	case captured = <-capturedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Hook 未捕获到 Entry")
+	}
 	if captured == nil {
 		t.Fatal("Hook 未捕获到 Entry")
 	}

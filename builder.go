@@ -585,7 +585,14 @@ func (l *logger) log(level Level, msg string, fields FieldGroup) {
 	e.Level = level
 	e.Time = time.Now()
 	e.Message = msg
-	e.Fields = l.redactFields(l.mergeFields(fields))
+	if l.fields.Len() == 0 {
+		e.Fields = fields
+	} else {
+		e.Fields = l.mergeFields(fields)
+	}
+	if len(l.redacted) > 0 {
+		e.Fields = l.redactFields(e.Fields)
+	}
 	e.ctx = l.ctx
 
 	// 调用者追踪：跳过 logx 自身和 Go runtime 栈帧，定位到业务调用代码

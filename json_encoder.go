@@ -63,8 +63,7 @@ func (e *jsonEncoder) Encode(buf *Buffer, entry *Entry) error {
 	buf.B = append(buf.B, jsonMessageKey...)
 	appendJSONString(buf, entry.Message)
 
-	for i := 0; i < entry.Fields.Len(); i++ {
-		f := entry.Fields.At(i)
+	for _, f := range entry.Fields.slice() {
 		buf.B = append(buf.B, ',')
 		appendJSONString(buf, f.Key)
 		buf.B = append(buf.B, ':')

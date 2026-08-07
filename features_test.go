@@ -487,6 +487,48 @@ func TestWithRedact(t *testing.T) {
 	}
 }
 
+func TestWithFieldAndRedact_MergeInLog(t *testing.T) {
+	var buf bytes.Buffer
+	logger, err := NewBuilder().
+		WithRedact("secret").
+		EnableWriter(&buf, InfoLevel).
+		Build()
+	if err != nil {
+		t.Fatalf("Build 失败：%v", err)
+	}
+
+	child := logger.WithField("base", "v")
+	child.Info("merged", Fields(String("secret", "hidden"), Int("n", 1)))
+
+	got := buf.String()
+	if !strings.Contains(got, "base=v") || !strings.Contains(got, "n=1") {
+		t.Errorf("合并字段缺失：%q", got)
+	}
+	if strings.Contains(got, "hidden") || !strings.Contains(got, "secret=***") {
+		t.Errorf("脱敏未生效：%q", got)
+	}
+}
+
+func TestMergeFields_EmptyLogger(t *testing.T) {
+	// logger 无级联字段时，mergeFields 应原样返回调用字段（早退分支）
+	l := &logger{}
+	fields := Fields(String("k", "v"))
+	got := l.mergeFields(fields)
+	if got.Len() != 1 || got.At(0).Key != "k" {
+		t.Errorf("空 logger 合并结果不符：%+v", got)
+	}
+}
+
+func TestRedactFields_NoConfig(t *testing.T) {
+	// 未配置脱敏时，redactFields 应原样返回（早退分支）
+	l := &logger{}
+	fields := Fields(String("k", "v"))
+	got := l.redactFields(fields)
+	if got.Len() != 1 || got.At(0).Key != "k" || got.At(0).str != "v" {
+		t.Errorf("未配置脱敏时不应修改字段：%+v", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 动态级别
 // ---------------------------------------------------------------------------

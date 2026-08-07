@@ -39,6 +39,18 @@ func (g FieldGroup) At(i int) Field {
 	return g.rest[i-g.n]
 }
 
+// slice 返回全部字段切片。不超过内联容量时零分配（直接指向内联数组），
+// 超过时按需拼接（罕见路径）。
+func (g *FieldGroup) slice() []Field {
+	if g.rest == nil {
+		return g.arr[:g.n]
+	}
+	all := make([]Field, 0, g.n+len(g.rest))
+	all = append(all, g.arr[:g.n]...)
+	all = append(all, g.rest...)
+	return all
+}
+
 // appendField 追加一个字段；内联容量内零分配，超出时按需分配。
 func (g *FieldGroup) appendField(f Field) {
 	if g.rest == nil && g.n < maxInlineFields {
@@ -67,11 +79,11 @@ const (
 // 常用类型直接存储在类型化槽位中，避免变量装箱分配；Value 仅作兜底。
 type Field struct {
 	Key   string
-	typ   fieldType
 	str   string
 	i64   int64
-	b     bool
 	Value any
+	typ   fieldType
+	b     bool
 }
 
 // String 构造一个字符串字段。

@@ -7,8 +7,6 @@ type Metrics struct {
 	Writes uint64
 	// WriteBytes 成功写入的字节数。
 	WriteBytes uint64
-	// Drops 异步模式因队列满被丢弃的日志条数。
-	Drops uint64
 	// Rotations 文件轮转次数。
 	Rotations uint64
 	// Compressions gzip 压缩成功的次数。

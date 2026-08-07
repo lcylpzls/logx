@@ -399,15 +399,11 @@ func TestWriterAppender_NoopLifecycle(t *testing.T) {
 	}
 }
 
-func TestFileOptions_ErrorHandlerAndOnDropped(t *testing.T) {
+func TestFileOptions_ErrorHandler(t *testing.T) {
 	fc := &FileConfig{}
 	WithErrorHandler(func(error) {})(fc)
-	WithOnDropped(func() {})(fc)
 	if fc.ErrorHandler == nil {
 		t.Error("WithErrorHandler 未生效")
-	}
-	if fc.OnDropped == nil {
-		t.Error("WithOnDropped 未生效")
 	}
 }
 

@@ -200,7 +200,6 @@ type FileConfig struct {
 	FlushInterval time.Duration // 异步批量刷盘间隔，默认 1 秒
 	Levels        []Level       // 启用的日志级别列表
 	ErrorHandler  func(error)   // 内部错误统一回调（nil=输出到 stderr）
-	OnDropped     func()        // 异步队列满、日志被丢弃时的回调
 }
 
 // FileOption 文件通道配置函数类型。
@@ -281,14 +280,6 @@ func WithLevels(levels ...Level) FileOption {
 func WithErrorHandler(fn func(error)) FileOption {
 	return func(c *FileConfig) {
 		c.ErrorHandler = fn
-	}
-}
-
-// WithOnDropped 设置异步队列满、日志被丢弃时的回调。
-// 回调在调用方协程内同步执行，请保持轻量。
-func WithOnDropped(fn func()) FileOption {
-	return func(c *FileConfig) {
-		c.OnDropped = fn
 	}
 }
 
@@ -528,7 +519,6 @@ func (l *logger) Metrics() Metrics {
 		cm := mp.Metrics()
 		m.Writes += cm.Writes
 		m.WriteBytes += cm.WriteBytes
-		m.Drops += cm.Drops
 		m.Rotations += cm.Rotations
 		m.Compressions += cm.Compressions
 		m.Cleanups += cm.Cleanups

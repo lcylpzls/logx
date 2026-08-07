@@ -276,7 +276,6 @@ logger, _ := logx.NewBuilder().
 ```go
 EnableFileLog(
     logx.WithErrorHandler(func(err error) { monitor.Report(err) }),
-    logx.WithOnDropped(func() { monitor.CountDrop() }), // 异步队列满丢弃时触发
 )
 ```
 
@@ -284,7 +283,7 @@ EnableFileLog(
 
 ```go
 if mp, ok := logger.(logx.MetricProvider); ok {
-    m := mp.Metrics() // Writes / WriteBytes / Drops / Rotations / Compressions / Cleanups
+    m := mp.Metrics() // Writes / WriteBytes / Rotations / Compressions / Cleanups
 }
 ```
 

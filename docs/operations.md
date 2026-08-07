@@ -18,7 +18,6 @@ logger, err := logx.NewBuilder().
         logx.WithFlushInterval(time.Second),
         logx.WithLevels(logx.InfoLevel, logx.ErrorLevel),
         logx.WithErrorHandler(func(err error) { /* 告警 */ }),
-        logx.WithOnDropped(func() { /* 预留，背压模式不触发 */ }),
     ).
     Build()
 ```
@@ -38,7 +37,6 @@ logger, err := logx.NewBuilder().
 | `WithFlushInterval` | 1s | 异步批量刷盘间隔 |
 | `WithLevels` | 无（静默） | 文件通道启用级别 |
 | `WithErrorHandler` | stderr | 内部错误统一出口 |
-| `WithOnDropped` | 无 | 丢弃回调（背压模式下不触发） |
 | `WithSampling` | 关闭 | 每秒最多 N 条 |
 | `WithRedact` | 关闭 | 指定 Key 自动脱敏 |
 | `WithEncoder` | 文本 | 切换 JSON 等编码器 |

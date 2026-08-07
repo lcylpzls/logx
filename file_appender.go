@@ -56,7 +56,6 @@ type fileAppender struct {
 	// 运行指标（原子计数）
 	written      atomic.Uint64 // 成功写入的日志条数
 	writeBytes   atomic.Uint64 // 成功写入的字节数
-	dropped      atomic.Uint64 // 异步模式被丢弃的日志条数
 	rotations    atomic.Uint64 // 文件轮转次数
 	compressions atomic.Uint64 // gzip 压缩成功次数
 	cleanups     atomic.Uint64 // 生命周期清理执行次数
@@ -694,7 +693,6 @@ func (fa *fileAppender) Metrics() Metrics {
 	return Metrics{
 		Writes:       fa.written.Load(),
 		WriteBytes:   fa.writeBytes.Load(),
-		Drops:        fa.dropped.Load(),
 		Rotations:    fa.rotations.Load(),
 		Compressions: fa.compressions.Load(),
 		Cleanups:     fa.cleanups.Load(),

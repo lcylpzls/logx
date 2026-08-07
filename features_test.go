@@ -1047,18 +1047,21 @@ func TestCleanup_MaxBackupsRemoveError(t *testing.T) {
 
 func TestCleanup_MaxBackupsCurrentFileSkipped(t *testing.T) {
 	dir := tempLogDir(t)
-	app, err := newFileAppender(&FileConfig{
-		LogDir:     dir,
-		Filename:   "mb.log",
-		WriteMode:  SyncWriteMode,
-		MaxBackups: 3,
-	})
+	// 手动构造（无后台生命周期协程），避免测试期修改配置与后台协程产生数据竞争
+	cur := filepath.Join(dir, "mb-2026-01-01.log")
+	curFile, err := os.OpenFile(cur, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
+		t.Fatalf("打开当前文件失败：%v", err)
 	}
-	defer app.Close()
-	fapp := app.(*fileAppender)
-	fapp.cfg.MaxAge = 0 // 关闭 MaxAge，避免第一遍清理把旧文件全部删除
+	t.Cleanup(func() { _ = curFile.Close() })
+	fapp := &fileAppender{
+		dir:           dir,
+		basenameNoExt: "mb",
+		ext:           ".log",
+		cfg:           FileConfig{MaxAge: 0, MaxBackups: 3},
+		file:          curFile,
+		errorHandler:  func(error) {},
+	}
 
 	// 把当前文件时间拨到最旧，确保清理循环先经过 currentPhysical 跳过分支
 	oldTime := time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC)

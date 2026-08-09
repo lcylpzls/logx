@@ -397,7 +397,7 @@ func (fa *fileAppender) openNewFile() error {
 	now := time.Now()
 	physicalPath := filepath.Join(fa.dir, fa.physicalName(now))
 
-	f, err := os.OpenFile(physicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := openNewFileFn(physicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("logx：无法创建物理日志文件 %s：%w", physicalPath, err)
 	}
@@ -460,6 +460,7 @@ var (
 	createDstFileFn = os.Create
 	pathStatFn      = os.Stat
 	fileStatFn      = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+	openNewFileFn   = os.OpenFile
 	sortStatFn      = os.Stat
 	ioCopyFn        = io.Copy
 	closeFileFn     = func(f *os.File) error { return f.Close() }

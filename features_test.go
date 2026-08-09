@@ -1495,8 +1495,10 @@ func TestFileAppender_AppendSyncRotationError(t *testing.T) {
 	// 关闭文件并删除目录，使轮转必然失败
 	fapp.mu.Lock()
 	fapp.file.Close()
+	// 轮转目标目录指向必然不存在的路径，保证轮转失败确定可复现
+	// （不依赖 RemoveAll 在 Windows 上是否立即生效）。
+	fapp.dir = filepath.Join(dir, "已删除")
 	fapp.mu.Unlock()
-	_ = os.RemoveAll(dir)
 	fapp.mu.Lock()
 	fapp.currentSize = int64(fapp.cfg.MaxSize) * 1024 * 1024
 	fapp.mu.Unlock()
@@ -1696,8 +1698,9 @@ func TestRunFlushLoop_RotationError(t *testing.T) {
 
 	fapp.mu.Lock()
 	fapp.file.Close()
+	// 轮转目标目录指向必然不存在的路径，保证轮转失败确定可复现。
+	fapp.dir = filepath.Join(dir, "已删除")
 	fapp.mu.Unlock()
-	_ = os.RemoveAll(dir)
 	fapp.mu.Lock()
 	fapp.currentSize = int64(fapp.cfg.MaxSize) * 1024 * 1024
 	fapp.mu.Unlock()

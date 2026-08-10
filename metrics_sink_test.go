@@ -1,6 +1,7 @@
 package logx
 
 import (
+	testx "github.com/lcylpzls/testx"
 	"strings"
 	"sync"
 	"testing"
@@ -52,9 +53,8 @@ func TestBuilderWithMetricsRecords(t *testing.T) {
 		EnableConsole(InfoLevel).
 		WithMetrics(sink).
 		Build()
-	if err != nil {
-		t.Fatal(err)
-	}
+	testx.RequireNoError(t, err)
+
 	logger.Info("测试日志", FieldGroup{})
 	if got := sink.count("logx.records"); got != 1 {
 		t.Errorf("records 计数不符：%d", got)
@@ -81,9 +81,8 @@ func TestFileAppenderMetricsSink(t *testing.T) {
 		).
 		WithMetrics(sink).
 		Build()
-	if err != nil {
-		t.Fatal(err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer logger.Close()
 	logger.Info("写入测试", FieldGroup{})
 	if err := logger.Sync(); err != nil {
@@ -106,9 +105,8 @@ func TestFileAppenderEmitHelpers(t *testing.T) {
 		LogDir:   t.TempDir(),
 		Filename: "app.log",
 	}, sink)
-	if err != nil {
-		t.Fatal(err)
-	}
+	testx.RequireNoError(t, err)
+
 	fa := app.(*fileAppender)
 	fa.emitCounter("logx.rotations")
 	fa.emitWrite(10)
@@ -124,9 +122,8 @@ func TestFileAppenderEmitHelpers(t *testing.T) {
 		LogDir:   t.TempDir(),
 		Filename: "app.log",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	testx.RequireNoError(t, err)
+
 	fa2 := app2.(*fileAppender)
 	defer fa2.Close()
 	fa2.emitCounter("logx.rotations")
@@ -139,9 +136,8 @@ func TestFileAppenderMetricsSinkSyncWrite(t *testing.T) {
 		LogDir:   t.TempDir(),
 		Filename: "app.log",
 	}, sink)
-	if err != nil {
-		t.Fatal(err)
-	}
+	testx.RequireNoError(t, err)
+
 	fa := app.(*fileAppender)
 	defer fa.Close()
 	if _, err := fa.appendSync([]byte("hello")); err != nil {

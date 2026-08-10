@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	testx "github.com/lcylpzls/testx"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +15,8 @@ import (
 func TestNewBuilder_DefaultOff(t *testing.T) {
 	// 没有任何 EnableXXX 调用时，Build() 返回无输出 logger。
 	logger, err := NewBuilder().Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	// 不调用任何 log 方法应该不会 panic，也不应有输出。
 	logger.Info("这条日志不应该出现", FieldGroup{})
 	logger.Debug("这条日志也不应该出现", FieldGroup{})
@@ -42,9 +42,7 @@ func TestBuilder_ConsoleDebug(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(DebugLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	if !logger.IsDebugEnabled() {
 		t.Error("EnableDebug 后 IsDebugEnabled 应返回 true")
@@ -61,9 +59,7 @@ func TestBuilder_ConsoleInfoOnly(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	if logger.IsDebugEnabled() {
 		t.Error("仅 EnableInfo 时 IsDebugEnabled 应返回 false")
@@ -77,9 +73,7 @@ func TestBuilder_ConsoleErrorOnly(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(ErrorLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	if logger.IsDebugEnabled() {
 		t.Error("仅 EnableError 时 IsDebugEnabled 应返回 false")
@@ -97,9 +91,7 @@ func TestWithField(t *testing.T) {
 	lg, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// 派生 logger 不影响原始实例。
 	child := lg.WithField("service", "api")
@@ -107,27 +99,24 @@ func TestWithField(t *testing.T) {
 
 	// 原始 logger 无额外字段
 	lgImpl, ok := lg.(*logger)
-	if !ok {
-		t.Fatal("类型断言失败")
-	}
+	testx.RequireTrue(t, ok)
+
 	if lgImpl.fields.Len() != 0 {
 		t.Errorf("原始 logger fields 应为空，实际 %d", lgImpl.fields.Len())
 	}
 
 	// child 有 1 个字段
 	cl, ok := child.(*logger)
-	if !ok {
-		t.Fatal("类型断言失败")
-	}
+	testx.RequireTrue(t, ok)
+
 	if cl.fields.Len() != 1 || cl.fields.At(0).Key != "service" {
 		t.Errorf("child fields 不符预期：%+v", cl.fields)
 	}
 
 	// grandchild 有 2 个字段
 	gcl, ok := grandchild.(*logger)
-	if !ok {
-		t.Fatal("类型断言失败")
-	}
+	testx.RequireTrue(t, ok)
+
 	if gcl.fields.Len() != 2 {
 		t.Errorf("grandchild fields 应为 2，实际 %d", gcl.fields.Len())
 	}
@@ -140,18 +129,15 @@ func TestWithContext(t *testing.T) {
 	lg, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	type ctxKey string
 	ctx := context.WithValue(context.Background(), ctxKey("trace_id"), "xyz")
 	child := lg.WithContext(ctx)
 
 	lgImpl, ok := child.(*logger)
-	if !ok {
-		t.Fatal("类型断言失败")
-	}
+	testx.RequireTrue(t, ok)
+
 	if lgImpl.ctx == nil {
 		t.Error("WithContext 后 ctx 不应为 nil")
 	}
@@ -164,9 +150,7 @@ func TestFormatfAPI(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(DebugLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// 确保不会 panic。
 	logger.Debugf("debug: %d", 1)
@@ -183,9 +167,7 @@ func TestMultipleChannels(t *testing.T) {
 		EnableConsole(InfoLevel).
 		EnableConsole(DebugLevel, WithColor()).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	if !logger.IsDebugEnabled() {
 		t.Error("有一个通道启用 Debug 时 IsDebugEnabled 应为 true")
@@ -213,9 +195,8 @@ func TestLevelString(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := tt.level.String()
-		if got != tt.want {
-			t.Errorf("Level(%d).String() = %q, want %q", tt.level, got, tt.want)
-		}
+		testx.Equal(t, got, tt.want)
+
 	}
 }
 
@@ -240,9 +221,8 @@ func TestIsLevelEnabled(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := isLevelEnabled(tt.minLvl, tt.target)
-		if got != tt.want {
-			t.Errorf("isLevelEnabled(%v, %v) = %v, want %v", tt.minLvl, tt.target, got, tt.want)
-		}
+		testx.Equal(t, got, tt.want)
+
 	}
 }
 
@@ -271,9 +251,7 @@ func TestFieldConstructors(t *testing.T) {
 	}
 
 	a := Any("data", struct{ X int }{10})
-	if a.Key != "data" {
-		t.Errorf("Any field key: %s", a.Key)
-	}
+	testx.Equal(t, a.Key, "data")
 
 	e := Err(context.Canceled)
 	if e.Key != "error" || e.Value != context.Canceled {
@@ -289,18 +267,16 @@ func TestConsoleAppender_Routing(t *testing.T) {
 
 	// 非 Error 级别写 stdout
 	n, err := app.Append(InfoLevel, []byte("stdout test\n"))
-	if err != nil {
-		t.Errorf("Append Info 失败：%v", err)
-	}
+	testx.NoError(t, err)
+
 	if n == 0 {
 		t.Error("Append Info 应写入数据")
 	}
 
 	// Error 及以上写 stderr
 	n, err = app.Append(ErrorLevel, []byte("stderr test\n"))
-	if err != nil {
-		t.Errorf("Append Error 失败：%v", err)
-	}
+	testx.NoError(t, err)
+
 	if n == 0 {
 		t.Error("Append Error 应写入数据")
 	}
@@ -320,9 +296,7 @@ func TestConcurrentLogging(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(DebugLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	const goroutines = 10
 	const messages = 100
@@ -346,9 +320,7 @@ func BenchmarkLogger_Info(b *testing.B) {
 	logger, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		b.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(b, err)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -360,9 +332,7 @@ func BenchmarkLogger_Infof(b *testing.B) {
 	logger, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		b.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(b, err)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -375,9 +345,7 @@ func BenchmarkLogger_DisabledLevel(b *testing.B) {
 	logger, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		b.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(b, err)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -415,9 +383,8 @@ func TestEntry_Context_NonNil(t *testing.T) {
 	original := context.WithValue(context.Background(), ctxKey("x"), "y")
 	e := &Entry{ctx: original}
 	got := e.Context()
-	if got != original {
-		t.Error("Context() should return the original ctx")
-	}
+	testx.Equal(t, got, original)
+
 }
 
 // TestMergeFields_BothNonEmpty 测试 logger 字段和方法字段均非空时的合并。
@@ -444,9 +411,8 @@ func TestMergeFields_LoggerOnly(t *testing.T) {
 	if merged.Len() != 1 {
 		t.Fatalf("merged length: got %d, want 1", merged.Len())
 	}
-	if merged.At(0).Key != "svc" {
-		t.Errorf("unexpected field: %+v", merged.At(0))
-	}
+	testx.Equal(t, merged.At(0).Key, "svc")
+
 }
 
 // TestMergeFields_Overflow 测试合并字段超出内联容量（>8）时的 rest 分支。
@@ -613,17 +579,15 @@ func TestBuild_UnknownAppenderType(t *testing.T) {
 		},
 	}
 	_, err := b.Build()
-	if err == nil {
-		t.Error("Build with unknown appender type should return error")
-	}
+	testx.Error(t, err)
+
 }
 
 // TestLogger_Warn_Structured 测试 Warn 级别的结构化日志。
 func TestLogger_Warn_Structured(t *testing.T) {
 	logger, err := NewBuilder().EnableConsole(WarnLevel).Build()
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	// 不 panic 即可
 	logger.Warn("warn msg", Fields(String("reason", "test")))
 }
@@ -646,9 +610,8 @@ func TestConsoleAppender_ErrorLevel_Stderr(t *testing.T) {
 	app := newConsoleAppender()
 	// 测试 Error 级别不会被路由到 stdout（通过检查是否不 panic）
 	n, err := app.Append(ErrorLevel, []byte("error to stderr\n"))
-	if err != nil {
-		t.Fatalf("Append ErrorLevel failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if n == 0 {
 		t.Error("Append should write bytes")
 	}
@@ -658,9 +621,8 @@ func TestConsoleAppender_ErrorLevel_Stderr(t *testing.T) {
 func TestConsoleAppender_PanicLevel_Stderr(t *testing.T) {
 	app := newConsoleAppender()
 	n, err := app.Append(PanicLevel, []byte("panic to stderr\n"))
-	if err != nil {
-		t.Fatalf("Append PanicLevel failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if n == 0 {
 		t.Error("Append should write bytes")
 	}
@@ -674,9 +636,8 @@ func TestBuild_FileAppenderWithNilFileCfg(t *testing.T) {
 		},
 	}
 	_, err := b.Build()
-	if err == nil {
-		t.Error("Build with fileAppenderType and nil fileCfg should return error")
-	}
+	testx.Error(t, err)
+
 }
 
 // TestBuild_SkipOffChannels 测试 Build 跳过 OffLevel 通道。
@@ -687,9 +648,8 @@ func TestBuild_SkipOffChannels(t *testing.T) {
 		},
 	}
 	l, err := b.Build()
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	// 应该创建一个空的 logger（无 cores）
 	lg := l.(*logger)
 	if len(lg.cores) != 0 {
@@ -740,9 +700,8 @@ func TestLogger_SyncError(t *testing.T) {
 		},
 	}
 	err := l.Sync()
-	if err == nil {
-		t.Error("Sync with failing appender should return error")
-	}
+	testx.Error(t, err)
+
 }
 
 // failingSyncAppender 同步操作返回错误。
@@ -760,9 +719,8 @@ func TestLogger_CloseError(t *testing.T) {
 		},
 	}
 	err := l.Close()
-	if err == nil {
-		t.Error("Close with failing appender should return error")
-	}
+	testx.Error(t, err)
+
 }
 
 // failingCloseAppender 关闭操作返回错误。
@@ -797,9 +755,8 @@ func TestLogger_Fatal(t *testing.T) {
 	logger, _ := NewBuilder().EnableConsole(InfoLevel).Build()
 	logger.Fatal("test fatal", FieldGroup{})
 
-	if !exited {
-		t.Error("Fatal should call osExit")
-	}
+	testx.True(t, exited)
+
 }
 
 // TestLogger_Fatalf covers Fatalf path by intercepting osExit.
@@ -815,9 +772,8 @@ func TestLogger_Fatalf(t *testing.T) {
 	logger, _ := NewBuilder().EnableConsole(InfoLevel).Build()
 	logger.Fatalf("test fatalf %d", 1)
 
-	if !exited {
-		t.Error("Fatalf should call osExit")
-	}
+	testx.True(t, exited)
+
 }
 
 // TestLogger_Fatal_SyncError covers Fatal's Sync path.
@@ -830,9 +786,8 @@ func TestLogger_Fatal_SyncError(t *testing.T) {
 
 	logger, _ := NewBuilder().EnableConsole(InfoLevel).Build()
 	logger.Fatal("test", FieldGroup{})
-	if !exited {
-		t.Error("Fatal should call osExit even if sync fails")
-	}
+	testx.True(t, exited)
+
 }
 
 // TestRunFlushLoop_FlushPath tests the flush loop's ticker path.
@@ -846,9 +801,7 @@ func TestRunFlushLoop_FlushPath(t *testing.T) {
 		BufferSize:    256,
 		FlushInterval: 50 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	fa.Append(InfoLevel, []byte("tick flush\n"))
 
@@ -891,9 +844,7 @@ func TestAppendAsync_BatchFlush(t *testing.T) {
 		BufferSize:    4096,
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// Write enough data to trigger batch flush (>64KB)
 	bigMsg := bytes.Repeat([]byte("x"), 1024) // 1KB each
@@ -925,9 +876,7 @@ func TestDrainAsync_WithError(t *testing.T) {
 		BufferSize:    256,
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	fa.Append(InfoLevel, []byte("test\n"))
 
@@ -997,9 +946,7 @@ func TestWithCaller_Enabled(t *testing.T) {
 		WithCaller().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	lgImpl := lg.(*logger)
 	capturedCh := make(chan *Entry, 1)
@@ -1016,12 +963,10 @@ func TestWithCaller_Enabled(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Hook 未捕获到 Entry")
 	}
-	if captured == nil {
-		t.Fatal("Hook 未捕获到 Entry")
-	}
-	if captured.CallerFile == "" {
-		t.Error("CallerFile 不应为空")
-	}
+	testx.RequireNotNil(t, captured)
+
+	testx.NotEqual(t, captured.CallerFile, "")
+
 	if captured.CallerLine == 0 {
 		t.Error("CallerLine 不应为 0")
 	}
@@ -1034,9 +979,7 @@ func TestWithCaller_Disabled(t *testing.T) {
 	lg, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	lgImpl := lg.(*logger)
 	capturedCh := make(chan *Entry, 1)
@@ -1053,12 +996,10 @@ func TestWithCaller_Disabled(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Hook 未捕获到 Entry")
 	}
-	if captured == nil {
-		t.Fatal("Hook 未捕获到 Entry")
-	}
-	if captured.CallerFile != "" {
-		t.Error("未启用 WithCaller 时 CallerFile 应为空")
-	}
+	testx.RequireNotNil(t, captured)
+
+	testx.Equal(t, captured.CallerFile, "")
+
 	if captured.CallerLine != 0 {
 		t.Error("未启用 WithCaller 时 CallerLine 应为 0")
 	}
@@ -1090,9 +1031,7 @@ func TestWithCaller_DerivedLogger(t *testing.T) {
 		WithCaller().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	child := lg.WithField("key", "val")
 	lgChild := child.(*logger)

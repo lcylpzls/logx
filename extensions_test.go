@@ -1,6 +1,7 @@
 package logx
 
 import (
+	testx "github.com/lcylpzls/testx"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,9 +19,7 @@ func TestLazy_DeferredEvaluation(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	called := false
 	fn := func() interface{} {
@@ -30,15 +29,12 @@ func TestLazy_DeferredEvaluation(t *testing.T) {
 
 	// Debug 未启用，Lazy 不应被执行
 	logger.Debug("debug msg", Fields(Lazy("data", fn)))
-	if called {
-		t.Error("Debug 未启用时 Lazy 函数不应被调用")
-	}
+	testx.False(t, called)
 
 	// Info 已启用，Lazy 应被执行
 	logger.Info("info msg", Fields(Lazy("data", fn)))
-	if !called {
-		t.Error("Info 启用时 Lazy 函数应被调用")
-	}
+	testx.True(t, called)
+
 }
 
 // TestReplaceStdLogger 测试标准库 log 劫持。
@@ -53,9 +49,8 @@ func TestReplaceStdLogger(t *testing.T) {
 			WithLevels(InfoLevel),
 		).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer logger.Close()
 
 	ReplaceStdLogger(logger)
@@ -72,9 +67,8 @@ func TestReplaceStdLogger(t *testing.T) {
 	}
 
 	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatalf("读取文件失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if !strings.Contains(string(data), "from std log") {
 		t.Errorf("标准库劫持：日志内容不匹配：%s", string(data))
 	}
@@ -85,9 +79,7 @@ func TestHook(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	var mu sync.Mutex
 	var received []string
@@ -101,9 +93,8 @@ func TestHook(t *testing.T) {
 	}
 
 	hl, ok := logger.(HookedLogger)
-	if !ok {
-		t.Fatal("logger 应实现 HookedLogger 接口")
-	}
+	testx.RequireTrue(t, ok)
+
 	hl.AddHook(testHook)
 
 	logger.Info("hook test message", FieldGroup{})
@@ -131,9 +122,7 @@ func TestSafeExit_NoPanic(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	exited := false
 	exitFunc := func() {
@@ -142,21 +131,18 @@ func TestSafeExit_NoPanic(t *testing.T) {
 
 	logger.SafeExit(exitFunc)
 
-	if !exited {
-		t.Error("SafeExit 应执行 exitFunc")
-	}
+	testx.True(t, exited)
+
 }
 
 // TestLazyFieldConstructor 测试 Lazy 字段构造。
 func TestLazyFieldConstructor(t *testing.T) {
 	f := Lazy("key", func() interface{} { return "val" })
-	if f.Key != "key" {
-		t.Errorf("Lazy field key: got %s, want key", f.Key)
-	}
+	testx.Equal(t, f.Key, "key")
+
 	lv, ok := f.Value.(*lazyValue)
-	if !ok {
-		t.Fatal("Lazy field value 应为 *lazyValue")
-	}
+	testx.RequireTrue(t, ok)
+
 	if lv.fn() != "val" {
 		t.Error("Lazy fn 应返回 val")
 	}
@@ -167,9 +153,7 @@ func TestHook_NoPanic(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableConsole(InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// 注册一个会 panic 的 Hook
 	hl := logger.(HookedLogger)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	testx "github.com/lcylpzls/testx"
 	"io"
 	"os"
 	"path/filepath"
@@ -35,9 +36,7 @@ func TestJSONEncoder_Basic(t *testing.T) {
 			Any("nil", nil),
 		),
 	})
-	if err != nil {
-		t.Fatalf("Encode 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	var out map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(buf.B), &out); err != nil {
@@ -74,9 +73,7 @@ func TestJSONEncoder_Escaping(t *testing.T) {
 		Message: msg,
 		Fields:  Fields(String("k", msg)),
 	})
-	if err != nil {
-		t.Fatalf("Encode 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	var out map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(buf.B), &out); err != nil {
@@ -98,12 +95,10 @@ func TestJSONEncoder_Lazy(t *testing.T) {
 		Message: "lazy",
 		Fields:  Fields(Lazy("info", func() any { called = true; return "computed" })),
 	})
-	if err != nil {
-		t.Fatalf("Encode 失败：%v", err)
-	}
-	if !called {
-		t.Error("Lazy 字段未被求值")
-	}
+	testx.RequireNoError(t, err)
+
+	testx.True(t, called)
+
 	if !bytes.Contains(buf.B, []byte(`"computed"`)) {
 		t.Errorf("Lazy 结果未输出：%s", buf.B)
 	}
@@ -120,9 +115,7 @@ func TestJSONEncoder_Caller(t *testing.T) {
 		CallerFile: "github.com/lcylpzls/logx/file.go",
 		CallerLine: 42,
 	})
-	if err != nil {
-		t.Fatalf("Encode 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	var out map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(buf.B), &out); err != nil {
@@ -160,9 +153,7 @@ func TestJSONEncoder_FieldTypes(t *testing.T) {
 			Any("struct", struct{ A int }{1}),
 		),
 	})
-	if err != nil {
-		t.Fatalf("Encode 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	var out map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(buf.B), &out); err != nil {
@@ -191,9 +182,8 @@ func TestTextEncoder_TypedFields(t *testing.T) {
 			Bool("b", true),
 		),
 	})
-	if err != nil {
-		t.Fatalf("Encode 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	out := string(buf.B)
 	for _, want := range []string{"s=v", "i=42", "i64=43", "b=true"} {
 		if !strings.Contains(out, want) {
@@ -213,9 +203,8 @@ func TestTextEncoder_CallerSingleSegment(t *testing.T) {
 		CallerFile: "main.go",
 		CallerLine: 7,
 	})
-	if err != nil {
-		t.Fatalf("Encode 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if !bytes.Contains(buf.B, []byte("main.go:7")) {
 		t.Errorf("单段调用者路径输出不符：%q", buf.B)
 	}
@@ -268,9 +257,8 @@ func TestJSONEncoder_CallerSingleSegment(t *testing.T) {
 		CallerFile: "main.go",
 		CallerLine: 3,
 	})
-	if err != nil {
-		t.Fatalf("Encode 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	var out map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(buf.B), &out); err != nil {
 		t.Fatalf("输出不是合法 JSON：%v", err)
@@ -332,9 +320,7 @@ func TestBuilder_WithJSONEncoderAndWriter(t *testing.T) {
 		WithEncoder(NewJSONEncoder()).
 		EnableWriter(&buf, InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	logger.Info("json via writer", Fields(String("k", "v")))
 
@@ -356,9 +342,7 @@ func TestBuilder_EnableWriter(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableWriter(&buf, InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	logger.Info("writer msg", FieldGroup{})
 	logger.Debug("should be filtered", FieldGroup{})
@@ -374,9 +358,8 @@ func TestBuilder_EnableWriter(t *testing.T) {
 func TestBuilder_EnableWriter_SilentWithoutLevels(t *testing.T) {
 	var buf bytes.Buffer
 	logger, err := NewBuilder().EnableWriter(&buf).Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	logger.Info("no output", FieldGroup{})
 	if buf.Len() != 0 {
 		t.Errorf("未指定级别时不应输出：%q", buf.String())
@@ -439,9 +422,8 @@ func TestBuilder_WithSampling(t *testing.T) {
 		WithSampling(1).
 		EnableWriter(&buf, InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	// 冒烟测试：仅验证采样配置不 panic、不阻塞正常使用。
 	logger.Info("sampled", FieldGroup{})
 	logger.Info("maybe dropped", FieldGroup{})
@@ -458,9 +440,7 @@ func TestWithRedact(t *testing.T) {
 		WithRedact("token").
 		EnableWriter(&buf, InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	lazyCalled := false
 	logger.Info("login", Fields(
@@ -479,9 +459,8 @@ func TestWithRedact(t *testing.T) {
 	if !strings.Contains(got, "user=alice") {
 		t.Errorf("非敏感字段被误伤：%q", got)
 	}
-	if lazyCalled {
-		t.Error("被脱敏的 Lazy 字段不应被求值")
-	}
+	testx.False(t, lazyCalled)
+
 }
 
 func TestWithFieldAndRedact_MergeInLog(t *testing.T) {
@@ -490,9 +469,7 @@ func TestWithFieldAndRedact_MergeInLog(t *testing.T) {
 		WithRedact("secret").
 		EnableWriter(&buf, InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	child := logger.WithField("base", "v")
 	child.Info("merged", Fields(String("secret", "hidden"), Int("n", 1)))
@@ -535,17 +512,15 @@ func TestSetLevel(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableWriter(&buf, InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if logger.IsDebugEnabled() {
 		t.Fatal("初始不应启用 Debug")
 	}
 
 	lu, ok := logger.(LevelUpdater)
-	if !ok {
-		t.Fatal("logger 未实现 LevelUpdater")
-	}
+	testx.RequireTrue(t, ok)
+
 	lu.SetLevel(DebugLevel)
 	if !logger.IsDebugEnabled() {
 		t.Fatal("SetLevel 后应启用 Debug")
@@ -561,9 +536,8 @@ func TestSetLevel_Concurrent(t *testing.T) {
 	logger, err := NewBuilder().
 		EnableWriter(io.Discard, InfoLevel).
 		Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	lu := logger.(LevelUpdater)
 
 	done := make(chan struct{})
@@ -613,9 +587,8 @@ func TestFileAppender_ErrorHandler(t *testing.T) {
 		WriteMode:    SyncWriteMode,
 		ErrorHandler: func(err error) { gotErr = err },
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fa := app.(*fileAppender)
 
@@ -626,9 +599,8 @@ func TestFileAppender_ErrorHandler(t *testing.T) {
 
 	c := newCore(newTextEncoder(false), app, DebugLevel)
 	c.write(&Entry{Level: InfoLevel, Message: "x"})
-	if gotErr == nil {
-		t.Error("错误处理器未被调用")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 type probeFailingEncoder struct{}
@@ -650,9 +622,8 @@ func TestCore_ReportEncodeError(t *testing.T) {
 	var gotErr error
 	c := newCore(probeFailingEncoder{}, &errorProbeAppender{handler: func(err error) { gotErr = err }}, DebugLevel)
 	c.write(&Entry{Level: InfoLevel, Message: "x"})
-	if gotErr == nil {
-		t.Error("编码错误未路由到通道错误处理器")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 type failingWriteAppender struct {
@@ -668,9 +639,8 @@ func TestCore_ReportWriteError(t *testing.T) {
 	var gotErr error
 	c := newCore(newTextEncoder(false), &failingWriteAppender{handler: func(err error) { gotErr = err }}, DebugLevel)
 	c.write(&Entry{Level: InfoLevel, Message: "x"})
-	if gotErr == nil {
-		t.Error("写入错误未路由到通道错误处理器")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 // ---------------------------------------------------------------------------
@@ -754,9 +724,8 @@ func TestFieldGroup_Overflow(t *testing.T) {
 	if g.Len() != maxInlineFields+2 {
 		t.Errorf("appendField 后 Len 不符：%d", g.Len())
 	}
-	if g.At(maxInlineFields+1).Key != "extra" {
-		t.Error("appendField 追加的字段不在末尾")
-	}
+	testx.Equal(t, g.At(maxInlineFields+1).Key, "extra")
+
 }
 
 func TestFieldGroup_AppendAllocatesRest(t *testing.T) {
@@ -769,9 +738,8 @@ func TestFieldGroup_AppendAllocatesRest(t *testing.T) {
 	if g.Len() != maxInlineFields+1 {
 		t.Fatalf("Len 不符：%d", g.Len())
 	}
-	if g.At(maxInlineFields).Key != "overflow" {
-		t.Error("溢出字段不在末尾")
-	}
+	testx.Equal(t, g.At(maxInlineFields).Key, "overflow")
+
 }
 
 func TestRecycleSlot_Full(t *testing.T) {
@@ -789,9 +757,8 @@ func TestReportError_Nil(t *testing.T) {
 	called := false
 	fa := &fileAppender{errorHandler: func(error) { called = true }}
 	fa.reportError(nil)
-	if called {
-		t.Error("nil 错误不应触发回调")
-	}
+	testx.False(t, called)
+
 }
 
 func TestSyncAsync_WriteError(t *testing.T) {
@@ -801,9 +768,8 @@ func TestSyncAsync_WriteError(t *testing.T) {
 		Filename:  "sync-err.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fapp := app.(*fileAppender)
 	fapp.cfg.WriteMode = AsyncWriteMode
@@ -828,9 +794,8 @@ func TestSyncAsync_Success(t *testing.T) {
 		Filename:  "sync-ok.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fapp := app.(*fileAppender)
 	fapp.cfg.WriteMode = AsyncWriteMode
@@ -866,16 +831,13 @@ func TestUpdateSymlink_CreateAndError(t *testing.T) {
 
 	// 成功分支
 	fa.createSymlink("app-2026-01-01.log")
-	if gotErr != nil {
-		t.Fatalf("成功分支不应报错：%v", gotErr)
-	}
+	testx.RequireNil(t, gotErr)
 
 	// 失败分支
 	createSymlinkFn = func(_, _ string) error { return fmt.Errorf("link fail") }
 	fa.createSymlink("app-2026-01-01.log")
-	if gotErr == nil {
-		t.Error("软链接失败未上报错误处理器")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 func TestCleanup_GlobError(t *testing.T) {
@@ -887,9 +849,8 @@ func TestCleanup_GlobError(t *testing.T) {
 		errorHandler:  func(err error) { gotErr = err },
 	}
 	fa.cleanup()
-	if gotErr == nil {
-		t.Error("Glob 语法错误未上报")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 func TestCleanup_MaxAgeRemoveError(t *testing.T) {
@@ -912,9 +873,8 @@ func TestCleanup_MaxAgeRemoveError(t *testing.T) {
 		errorHandler:  func(err error) { gotErr = err },
 	}
 	fa.cleanup()
-	if gotErr == nil {
-		t.Error("MaxAge 删除失败未上报错误处理器")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 func TestCleanup_StatError(t *testing.T) {
@@ -946,9 +906,8 @@ func TestCleanup_MaxAgeCurrentFileSkipped(t *testing.T) {
 		WriteMode: SyncWriteMode,
 		MaxAge:    1,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fapp := app.(*fileAppender)
 
@@ -995,9 +954,8 @@ func TestCleanup_MaxBackupsDeletesOldest(t *testing.T) {
 	fa.cleanup()
 
 	files, err := filepath.Glob(filepath.Join(dir, "old-*.log"))
-	if err != nil {
-		t.Fatalf("Glob 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if len(files) != 3 {
 		t.Errorf("MaxBackups 保留数量不符：got %d, want 3", len(files))
 	}
@@ -1037,9 +995,8 @@ func TestCleanup_MaxBackupsRemoveError(t *testing.T) {
 	}
 	fa.cleanup()
 
-	if gotErr == nil {
-		t.Error("MaxBackups 删除失败未上报错误处理器")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 func TestCleanup_MaxBackupsCurrentFileSkipped(t *testing.T) {
@@ -1047,9 +1004,8 @@ func TestCleanup_MaxBackupsCurrentFileSkipped(t *testing.T) {
 	// 手动构造（无后台生命周期协程），避免测试期修改配置与后台协程产生数据竞争
 	cur := filepath.Join(dir, "mb-2026-01-01.log")
 	curFile, err := os.OpenFile(cur, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		t.Fatalf("打开当前文件失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	t.Cleanup(func() { _ = curFile.Close() })
 	fapp := &fileAppender{
 		dir:           dir,
@@ -1084,9 +1040,8 @@ func TestCleanup_MaxBackupsCurrentFileSkipped(t *testing.T) {
 		t.Error("当前文件不应被 MaxBackups 删除")
 	}
 	files, err := filepath.Glob(filepath.Join(dir, "mb-*.log"))
-	if err != nil {
-		t.Fatalf("Glob 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if len(files) != 3 {
 		t.Errorf("MaxBackups 保留数量不符：got %d, want 3", len(files))
 	}
@@ -1131,9 +1086,8 @@ func TestCleanup_CompressCurrentFileSkipped(t *testing.T) {
 	dir := tempLogDir(t)
 	cur := filepath.Join(dir, "cc-2026-01-01.log")
 	curFile, err := os.OpenFile(cur, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		t.Fatalf("打开当前文件失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	t.Cleanup(func() { _ = curFile.Close() })
 
 	old := filepath.Join(dir, "cc-2020-01-01.log")
@@ -1343,9 +1297,8 @@ func TestCompressFile_RemoveSrcError(t *testing.T) {
 func TestReportError_DefaultStderr(t *testing.T) {
 	orig := os.Stderr
 	f, err := os.CreateTemp("", "logx-stderr-*")
-	if err != nil {
-		t.Fatalf("创建临时文件失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	os.Stderr = f
 	t.Cleanup(func() {
 		os.Stderr = orig
@@ -1358,9 +1311,8 @@ func TestReportError_DefaultStderr(t *testing.T) {
 
 	_ = f.Sync()
 	data, err := os.ReadFile(f.Name())
-	if err != nil {
-		t.Fatalf("读取 stderr 内容失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if !strings.Contains(string(data), "stderr fallback") {
 		t.Errorf("默认错误输出未写入 stderr：%q", data)
 	}
@@ -1380,18 +1332,16 @@ func TestLogger_Metrics(t *testing.T) {
 			WithLevels(InfoLevel),
 		).
 		Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer logger.Close()
 
 	logger.Info("metric entry", FieldGroup{})
 	logger.Sync()
 
 	mp, ok := logger.(MetricProvider)
-	if !ok {
-		t.Fatal("logger 未实现 MetricProvider")
-	}
+	testx.RequireTrue(t, ok)
+
 	m := mp.Metrics()
 	if m.Writes == 0 {
 		t.Error("Writes 应为正数")
@@ -1406,13 +1356,11 @@ func TestLogger_Metrics(t *testing.T) {
 
 func TestLogger_Metrics_ConsoleOnly(t *testing.T) {
 	logger, err := NewBuilder().EnableConsole(InfoLevel).Build()
-	if err != nil {
-		t.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	mp, ok := logger.(MetricProvider)
-	if !ok {
-		t.Fatal("logger 未实现 MetricProvider")
-	}
+	testx.RequireTrue(t, ok)
+
 	// 控制台通道不提供指标，应安全返回零值而非 panic。
 	_ = mp.Metrics()
 }
@@ -1450,9 +1398,8 @@ func TestFileAppender_LogDirIsFile(t *testing.T) {
 		LogDir:   filePath,
 		Filename: "a.log",
 	})
-	if err == nil {
-		t.Fatal("LogDir 指向文件时应报错")
-	}
+	testx.RequireError(t, err)
+
 }
 
 func TestFileAppender_InvalidFilename(t *testing.T) {
@@ -1461,9 +1408,8 @@ func TestFileAppender_InvalidFilename(t *testing.T) {
 		LogDir:   dir,
 		Filename: "sub/app.log", // 子目录不存在，物理文件创建必然失败
 	})
-	if err == nil {
-		t.Fatal("无法创建物理文件时应报错")
-	}
+	testx.RequireError(t, err)
+
 }
 
 func TestFileAppender_AbsError(t *testing.T) {
@@ -1475,9 +1421,8 @@ func TestFileAppender_AbsError(t *testing.T) {
 		LogDir:   tempLogDir(t),
 		Filename: "a.log",
 	})
-	if err == nil {
-		t.Fatal("Abs 失败时应报错")
-	}
+	testx.RequireError(t, err)
+
 }
 
 func TestFileAppender_AppendSyncRotationError(t *testing.T) {
@@ -1487,9 +1432,8 @@ func TestFileAppender_AppendSyncRotationError(t *testing.T) {
 		Filename:  "rot-err.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fapp := app.(*fileAppender)
 
@@ -1518,9 +1462,8 @@ func TestFileAppender_AppendAfterClose(t *testing.T) {
 		Filename:  "closed.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	fa.Close()
 	if _, err := fa.Append(InfoLevel, []byte("x")); err == nil {
 		t.Error("关闭后 Append 应返回错误")
@@ -1534,9 +1477,7 @@ func TestFileAppender_CloseError_Injected(t *testing.T) {
 		Filename:  "close-err.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	oldClose := closeFileFn
 	closeFileFn = func(f *os.File) error {
@@ -1577,9 +1518,8 @@ func TestFileAppender_NoExtension(t *testing.T) {
 		Filename:  "plain",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	files, err := filepath.Glob(filepath.Join(dir, "plain-*.log"))
@@ -1595,9 +1535,8 @@ func TestFileAppender_TimeRotation(t *testing.T) {
 		Filename:  "time-rot.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 	fapp := fa.(*fileAppender)
 
@@ -1623,9 +1562,8 @@ func TestAsyncBatchFlush(t *testing.T) {
 		BufferSize:    1024,
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	payload := bytes.Repeat([]byte("x"), 70*1024)
@@ -1654,9 +1592,8 @@ func TestAsyncFlush_AfterCancel(t *testing.T) {
 		BufferSize:    16,
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 	fapp := fa.(*fileAppender)
 
@@ -1693,9 +1630,8 @@ func TestRunFlushLoop_RotationError(t *testing.T) {
 			}
 		},
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 	fapp := fa.(*fileAppender)
 
@@ -1731,9 +1667,8 @@ func TestDrainAsync_WriteError(t *testing.T) {
 		WriteMode:    SyncWriteMode,
 		ErrorHandler: func(err error) { gotErr = err },
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fapp := app.(*fileAppender)
 	fapp.writeCh = make(chan []byte, 1)
@@ -1745,9 +1680,8 @@ func TestDrainAsync_WriteError(t *testing.T) {
 	fapp.mu.Unlock()
 
 	fapp.drainAsync()
-	if gotErr == nil {
-		t.Error("drainAsync 写失败未上报错误处理器")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 func TestDrainAsync_RotationError(t *testing.T) {
@@ -1759,9 +1693,8 @@ func TestDrainAsync_RotationError(t *testing.T) {
 		WriteMode:    SyncWriteMode,
 		ErrorHandler: func(err error) { gotErr = err },
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fapp := app.(*fileAppender)
 	fapp.writeCh = make(chan []byte, 1)
@@ -1781,9 +1714,8 @@ func TestDrainAsync_RotationError(t *testing.T) {
 	fapp.mu.Unlock()
 
 	fapp.drainAsync()
-	if gotErr == nil {
-		t.Error("drainAsync 轮转失败未上报错误处理器")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 func TestSyncAsync_RotationError(t *testing.T) {
@@ -1793,9 +1725,8 @@ func TestSyncAsync_RotationError(t *testing.T) {
 		Filename:  "sync-rot.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fapp := app.(*fileAppender)
 	fapp.cfg.WriteMode = AsyncWriteMode
@@ -1829,9 +1760,8 @@ func TestSyncAsync_FileNilAfterClose(t *testing.T) {
 		BufferSize:    16,
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if err := fa.Close(); err != nil {
 		t.Fatalf("Close 失败：%v", err)
 	}
@@ -1866,9 +1796,8 @@ func TestLifecycle_TickerCleanup(t *testing.T) {
 		Filename:  "lc.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer app.Close()
 	fapp := app.(*fileAppender)
 
@@ -1912,9 +1841,8 @@ func TestCompressFile_ErrorHandler(t *testing.T) {
 	var gotErr error
 	fa := &fileAppender{errorHandler: func(err error) { gotErr = err }}
 	fa.compressFile(src)
-	if gotErr == nil {
-		t.Error("压缩失败未上报错误处理器")
-	}
+	testx.NotNil(t, gotErr)
+
 }
 
 // ---------------------------------------------------------------------------

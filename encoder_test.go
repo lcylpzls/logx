@@ -2,6 +2,7 @@ package logx
 
 import (
 	"fmt"
+	testx "github.com/lcylpzls/testx"
 	"strings"
 	"testing"
 	"time"
@@ -24,9 +25,7 @@ func TestTextEncoder_Format(t *testing.T) {
 	buf := getBuffer()
 	defer putBuffer(buf)
 	err := enc.Encode(buf, entry)
-	if err != nil {
-		t.Fatalf("Encode() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	s := string(buf.B)
 
@@ -58,9 +57,7 @@ func TestTextEncoder_NoFields(t *testing.T) {
 	buf := getBuffer()
 	defer putBuffer(buf)
 	err := enc.Encode(buf, entry)
-	if err != nil {
-		t.Fatalf("Encode() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	s := string(buf.B)
 	if strings.Contains(s, "{") {
@@ -126,9 +123,8 @@ func TestLevelToBytes_All(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := string(levelToBytes(tt.level))
-		if got != tt.want {
-			t.Errorf("levelToBytes(%d) = %q, want %q", tt.level, got, tt.want)
-		}
+		testx.Equal(t, got, tt.want)
+
 	}
 }
 
@@ -187,9 +183,8 @@ func TestAppendFieldValue_AllTypes(t *testing.T) {
 			defer putBuffer(buf)
 			enc.appendFieldValue(buf, tt.value)
 			got := string(buf.B)
-			if got != tt.want {
-				t.Errorf("appendFieldValue(%T) = %q, want %q", tt.value, got, tt.want)
-			}
+			testx.Equal(t, got, tt.want)
+
 		})
 	}
 }
@@ -205,9 +200,8 @@ func TestAppendFieldValue_Lazy(t *testing.T) {
 	enc.appendFieldValue(buf, lv)
 
 	got := string(buf.B)
-	if got != "lazy result" {
-		t.Errorf("appendFieldValue(*lazyValue) = %q, want %q", got, "lazy result")
-	}
+	testx.Equal(t, got, "lazy result")
+
 }
 
 // TestAppendFieldValue_Default 测试 appendFieldValue 的 default 分支（未知类型）。
@@ -221,9 +215,8 @@ func TestAppendFieldValue_Default(t *testing.T) {
 	enc.appendFieldValue(buf, customType{Name: "custom"})
 
 	got := string(buf.B)
-	if got != "{custom}" {
-		t.Errorf("appendFieldValue(default) = %q, want %q", got, "{custom}")
-	}
+	testx.Equal(t, got, "{custom}")
+
 }
 
 // TestTextEncoder_ColorOutput 测试带颜色模式的文本编码。
@@ -238,9 +231,7 @@ func TestTextEncoder_ColorOutput(t *testing.T) {
 	buf := getBuffer()
 	defer putBuffer(buf)
 	err := enc.Encode(buf, entry)
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	s := string(buf.B)
 	// 应包含 ANSI 颜色码

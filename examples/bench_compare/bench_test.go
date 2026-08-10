@@ -1,6 +1,7 @@
 package main
 
 import (
+	testx "github.com/lcylpzls/testx"
 	"io"
 	"os"
 	"testing"
@@ -20,9 +21,7 @@ func BenchmarkLogx(b *testing.B) {
 	logger, err := logx.NewBuilder().
 		EnableWriter(io.Discard, logx.InfoLevel).
 		Build()
-	if err != nil {
-		b.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(b, err)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -76,9 +75,8 @@ func BenchmarkLogrus(b *testing.B) {
 // BenchmarkLogxAsyncFile 测 logx 文件异步写入路径（槽位复用，稳态应零分配）。
 func BenchmarkLogxAsyncFile(b *testing.B) {
 	dir, err := os.MkdirTemp("", "logx-bench-async-*")
-	if err != nil {
-		b.Fatalf("创建临时目录失败：%v", err)
-	}
+	testx.RequireNoError(b, err)
+
 	defer os.RemoveAll(dir)
 
 	logger, err := logx.NewBuilder().
@@ -91,9 +89,8 @@ func BenchmarkLogxAsyncFile(b *testing.B) {
 			logx.WithLevels(logx.InfoLevel),
 		).
 		Build()
-	if err != nil {
-		b.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(b, err)
+
 	defer logger.Close()
 
 	b.ResetTimer()
@@ -109,9 +106,8 @@ func BenchmarkLogxAsyncFile(b *testing.B) {
 // BenchmarkLogxSyncFile 测 logx 文件同步写入路径（应零分配）。
 func BenchmarkLogxSyncFile(b *testing.B) {
 	dir, err := os.MkdirTemp("", "logx-bench-sync-*")
-	if err != nil {
-		b.Fatalf("创建临时目录失败：%v", err)
-	}
+	testx.RequireNoError(b, err)
+
 	defer os.RemoveAll(dir)
 
 	logger, err := logx.NewBuilder().
@@ -122,9 +118,8 @@ func BenchmarkLogxSyncFile(b *testing.B) {
 			logx.WithLevels(logx.InfoLevel),
 		).
 		Build()
-	if err != nil {
-		b.Fatalf("Build 失败：%v", err)
-	}
+	testx.RequireNoError(b, err)
+
 	defer logger.Close()
 
 	b.ResetTimer()

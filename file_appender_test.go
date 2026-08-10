@@ -3,6 +3,7 @@ package logx
 import (
 	"bytes"
 	"fmt"
+	testx "github.com/lcylpzls/testx"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,9 +18,8 @@ import (
 func tempLogDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "logx-test-*")
-	if err != nil {
-		t.Fatalf("创建临时目录失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
 }
@@ -33,17 +33,15 @@ func TestFileAppender_SyncWrite(t *testing.T) {
 		Filename:  "test.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("NewFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	// 写入日志
 	msg := []byte("hello file log\n")
 	n, err := fa.Append(InfoLevel, msg)
-	if err != nil {
-		t.Fatalf("Append 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if n != len(msg) {
 		t.Errorf("写入字节数不匹配：got %d, want %d", n, len(msg))
 	}
@@ -61,9 +59,8 @@ func TestFileAppender_SyncWrite(t *testing.T) {
 
 	// 读取内容验证
 	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatalf("读取日志文件失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if string(data) != string(msg) {
 		t.Errorf("文件内容不匹配：\ngot  %q\nwant %q", string(data), string(msg))
 	}
@@ -80,9 +77,7 @@ func TestFileAppender_AsyncWrite(t *testing.T) {
 		BufferSize:    256,
 		FlushInterval: 100 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatalf("NewFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// 写入多条日志
 	for i := 0; i < 10; i++ {
@@ -106,9 +101,8 @@ func TestFileAppender_AsyncWrite(t *testing.T) {
 	}
 
 	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatalf("读取日志文件失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if len(data) == 0 {
 		t.Error("异步日志文件为空")
 	}
@@ -125,9 +119,7 @@ func TestFileAppender_CloseDrainsChannel(t *testing.T) {
 		BufferSize:    256,
 		FlushInterval: time.Hour, // 长间隔，确保不会自动刷盘
 	})
-	if err != nil {
-		t.Fatalf("NewFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// 写入消息后立即关闭
 	msg := []byte("drain test\n")
@@ -155,9 +147,8 @@ func TestFileAppender_SizeRotation(t *testing.T) {
 		WriteMode: SyncWriteMode,
 		MaxSize:   1, // 1MB，写入 2KB 就会触发
 	})
-	if err != nil {
-		t.Fatalf("NewFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	// 先用小数据确认不轮转
@@ -198,9 +189,8 @@ func TestFileAppender_Symlink(t *testing.T) {
 		Filename:  "app.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("NewFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	fa.Append(InfoLevel, []byte("test\n"))
@@ -209,18 +199,16 @@ func TestFileAppender_Symlink(t *testing.T) {
 	// 验证软链接存在
 	symlinkPath := filepath.Join(dir, "app.log")
 	info, err := os.Lstat(symlinkPath)
-	if err != nil {
-		t.Fatalf("软链接不存在：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if info.Mode()&os.ModeSymlink == 0 {
 		t.Error("app.log 应为软链接")
 	}
 
 	// 验证软链接指向的文件可读
 	target, err := os.Readlink(symlinkPath)
-	if err != nil {
-		t.Fatalf("读取软链接目标失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	if !strings.HasPrefix(target, "app-") {
 		t.Errorf("软链接应指向 app-*.log 格式的文件，实际：%s", target)
 	}
@@ -240,9 +228,8 @@ func TestFileAppender_InvalidConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := newFileAppender(tt.cfg)
-			if err == nil {
-				t.Error("应返回错误")
-			}
+			testx.Error(t, err)
+
 		})
 	}
 }
@@ -256,9 +243,7 @@ func TestFileAppender_DoubleClose(t *testing.T) {
 		Filename:  "double.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("NewFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// 第一次关闭
 	if err := fa.Close(); err != nil {
@@ -272,9 +257,8 @@ func TestFileAppender_DoubleClose(t *testing.T) {
 
 	// 关闭后写入应报错
 	_, err = fa.Append(InfoLevel, []byte("after close\n"))
-	if err == nil {
-		t.Error("关闭后 Append 应返回错误")
-	}
+	testx.Error(t, err)
+
 }
 
 // TestBuilder_FileLog 端到端 Builder → FileAppender 集成测试。
@@ -289,9 +273,8 @@ func TestBuilder_FileLog(t *testing.T) {
 			WithLevels(InfoLevel),
 		).
 		Build()
-	if err != nil {
-		t.Fatalf("Build() 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer logger.Close()
 
 	logger.Info("integration test", Fields(String("key", "val")))
@@ -304,9 +287,7 @@ func TestBuilder_FileLog(t *testing.T) {
 	}
 
 	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatalf("读取文件失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	content := string(data)
 	if !strings.Contains(content, "integration test") {
@@ -328,9 +309,7 @@ func TestCleanup_MaxAge(t *testing.T) {
 		MaxAge:    0, // 立即过期
 		MaxSize:   100,
 	})
-	if err != nil {
-		t.Fatalf("NewFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	fa.Append(InfoLevel, []byte("test\n"))
 	fa.Sync()
@@ -360,9 +339,7 @@ func TestCleanup_CompressAfter(t *testing.T) {
 		MaxAge:        180,
 		MaxSize:       100,
 	})
-	if err != nil {
-		t.Fatalf("NewFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	fa.Append(InfoLevel, []byte("compress me\n"))
 	fa.Sync()
@@ -411,9 +388,8 @@ func TestFileAppender_AllOptions(t *testing.T) {
 		BufferSize:    8192,
 		FlushInterval: 500 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender with all options failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	fa.Append(InfoLevel, []byte("test\n"))
@@ -452,9 +428,8 @@ func TestFileAppender_CustomBufferAndFlush(t *testing.T) {
 		BufferSize:    128,
 		FlushInterval: 50 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	for i := 0; i < 5; i++ {
@@ -479,16 +454,14 @@ func TestFileAppender_NoExtUsesDefault(t *testing.T) {
 		Filename:  "noext",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	// 验证文件后缀为 .log
 	faImpl := fa.(*fileAppender)
-	if faImpl.ext != ".log" {
-		t.Errorf("expected .log extension, got %s", faImpl.ext)
-	}
+	testx.Equal(t, faImpl.ext, ".log")
+
 }
 
 // TestFileAppender_AppendSync_RotationError 测试 appendSync 中 checkRotation 失败路径。
@@ -500,16 +473,13 @@ func TestFileAppender_AppendSync_RotationError(t *testing.T) {
 		Filename:  "rot-err.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// 关闭后写入应触发错误
 	fa.Close()
 	_, err = fa.Append(InfoLevel, []byte("after close\n"))
-	if err == nil {
-		t.Error("Append after Close should return error")
-	}
+	testx.Error(t, err)
+
 }
 
 // TestFileAppender_SyncAsyncError 测试 syncAsync 的各种路径。
@@ -523,9 +493,8 @@ func TestFileAppender_SyncAsyncError(t *testing.T) {
 		BufferSize:    256,
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	// 写入少量数据后立即 sync（通道可能为空，走 file.Sync 路径）
@@ -547,9 +516,8 @@ func TestNewFileAppender_Defaults(t *testing.T) {
 		WriteMode: SyncWriteMode,
 		// 不设置 MaxSize, BufferSize 等，验证默认值
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	faImpl := fa.(*fileAppender)
@@ -566,9 +534,8 @@ func TestNewFileAppender_Defaults(t *testing.T) {
 	if faImpl.cfg.BufferSize != 4096 {
 		t.Errorf("default BufferSize = %d, want 4096", faImpl.cfg.BufferSize)
 	}
-	if faImpl.cfg.FlushInterval != time.Second {
-		t.Errorf("default FlushInterval = %v, want 1s", faImpl.cfg.FlushInterval)
-	}
+	testx.Equal(t, faImpl.cfg.FlushInterval, time.Second)
+
 	if faImpl.cfg.CompressAfter != 0 {
 		t.Errorf("default CompressAfter = %d, want 0", faImpl.cfg.CompressAfter)
 	}
@@ -587,9 +554,8 @@ func TestFileAppender_CompressFile_Error(t *testing.T) {
 		Filename:  "compress-err.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 	faImpl := fa.(*fileAppender)
 	faImpl.compressFile(filepath.Join(dir, "nonexistent.log"))
@@ -605,9 +571,8 @@ func TestFileAppender_Cleanup_MaxBackups(t *testing.T) {
 		MaxBackups: 2,
 		MaxAge:     365,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 	fa.Append(InfoLevel, []byte("test\n"))
 	fa.Sync()
@@ -628,9 +593,8 @@ func TestFileAppender_CheckRotation_NaturalDay(t *testing.T) {
 		WriteMode: SyncWriteMode,
 		MaxSize:   1000,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 	faImpl := fa.(*fileAppender)
 	faImpl.mu.Lock()
@@ -652,9 +616,8 @@ func TestFileAppender_Close_FileAlreadyClosed(t *testing.T) {
 		Filename:  "nilfile.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	faImpl := fa.(*fileAppender)
 	faImpl.mu.Lock()
 	faImpl.file.Close()
@@ -676,15 +639,13 @@ func TestFileAppender_AppendAsync_ChannelFull(t *testing.T) {
 		BufferSize:    1,
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 	for i := 0; i < 100; i++ {
 		n, err := fa.Append(InfoLevel, []byte("drop me\n"))
-		if err != nil {
-			t.Fatalf("Append should not error even when channel full: %v", err)
-		}
+		testx.RequireNoError(t, err)
+
 		_ = n
 	}
 }
@@ -699,9 +660,8 @@ func TestFileAppender_FlushLoop_Ticker(t *testing.T) {
 		BufferSize:    4096,
 		FlushInterval: 50 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender failed: %v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	// Write a small message (won't trigger batch threshold)
@@ -750,9 +710,7 @@ func TestFileAppender_SyncAsync(t *testing.T) {
 		BufferSize:    256,
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	msg := []byte("sync async test\n")
 	fa.Append(InfoLevel, msg)
@@ -813,9 +771,8 @@ func TestFileAppender_NewFileAppender_FullConfig(t *testing.T) {
 		BufferSize:    1024,
 		FlushInterval: time.Second,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender with full config 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	fa.Append(InfoLevel, []byte("test\n"))
@@ -832,9 +789,8 @@ func TestFileAppender_AppendSync_Rotation(t *testing.T) {
 		WriteMode: SyncWriteMode,
 		MaxSize:   1,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	// Fill up to near max
@@ -861,17 +817,14 @@ func TestFileAppender_AsyncChannelFullDrop(t *testing.T) {
 		BufferSize:    1, // Tiny buffer
 		FlushInterval: time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// Fill the channel
 	fa.Append(InfoLevel, []byte("msg1\n"))
 	// This should hit the "default" (drop) path
 	n, err := fa.Append(InfoLevel, []byte("msg2\n"))
-	if err != nil {
-		t.Errorf("appendAsync should not error on full channel: %v", err)
-	}
+	testx.NoError(t, err)
+
 	if n != 0 {
 		t.Logf("appendAsync on full channel returned %d (drop path)", n)
 	}
@@ -902,9 +855,7 @@ func TestFileAppender_RunLifecycle(t *testing.T) {
 		Filename:  "lifecycle.log",
 		WriteMode: SyncWriteMode,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	fa.Append(InfoLevel, []byte("test\n"))
 	fa.Sync()
@@ -925,9 +876,7 @@ func TestCleanup_MaxBackupsDeletion(t *testing.T) {
 		MaxBackups: 2,
 		MaxAge:     180,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	// Write to current file
 	fa.Append(InfoLevel, []byte("current\n"))
@@ -970,9 +919,7 @@ func TestCleanup_CompressError(t *testing.T) {
 		CompressAfter: 1,
 		MaxAge:        180,
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
 
 	fa.Append(InfoLevel, []byte("compress\n"))
 	fa.Sync()
@@ -1040,9 +987,8 @@ func TestFileAppender_AppendOnClosed(t *testing.T) {
 	fa.Close()
 
 	_, err := fa.Append(InfoLevel, []byte("after close"))
-	if err == nil {
-		t.Error("Append after close should error")
-	}
+	testx.Error(t, err)
+
 }
 
 // TestFileAppender_CheckRotation_TimeRotation tests midnight rotation check.
@@ -1055,9 +1001,8 @@ func TestFileAppender_CheckRotation_TimeRotation(t *testing.T) {
 		WriteMode: SyncWriteMode,
 		MaxSize:   100, // large, won't trigger size rotation
 	})
-	if err != nil {
-		t.Fatalf("newFileAppender 失败：%v", err)
-	}
+	testx.RequireNoError(t, err)
+
 	defer fa.Close()
 
 	fa.Append(InfoLevel, []byte("before rotation\n"))

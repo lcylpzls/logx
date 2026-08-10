@@ -1,5 +1,5 @@
 github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
+github.com/lcylpzls/logx v1.0.0/go.mod h1:reR9kkXoO1rL8xqvvDvNAyyKsU4nqA/9WJlkeQDne4I=
 github.com/lcylpzls/logx v1.1.0/go.mod h1:reR9kkXoO1rL8xqvvDvNAyyKsU4nqA/9WJlkeQDne4I=
-github.com/lcylpzls/logx v1.3.0/go.mod h1:eX8QMpxjv2igvhDPeHyCaFOp1wfNTpJVTmAQbn9naoE=
-github.com/lcylpzls/testx v1.4.1 h1:AwncHEN/C7BkuDVdt2Wt2l08xbJu9GUB92LwPeMiu6c=
-github.com/lcylpzls/testx v1.4.1/go.mod h1:fSIAIHupdm3N+YU1CqHxsfXUb3z8bz5NF6AXDPzMha0=
+github.com/lcylpzls/logx v1.3.1/go.mod h1:eX8QMpxjv2igvhDPeHyCaFOp1wfNTpJVTmAQbn9naoE=
+github.com/lcylpzls/testx v1.2.1/go.mod h1:RQM/Rpxw2CfbZHXrChB9Mq+kMryQ+fQy10jHd9CeQTc=

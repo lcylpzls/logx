@@ -1,7 +1,6 @@
 module github.com/lcylpzls/logx/examples/bench_compare
 
-go 1.26.5
-
+go 1.21
 require (
 	github.com/lcylpzls/logx v1.0.0
 	github.com/lcylpzls/testx v1.2.0

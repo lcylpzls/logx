@@ -2,4 +2,6 @@ module github.com/lcylpzls/logx/examples/file_output
 
 go 1.26.5
 
-require github.com/lcylpzls/logx v1.3.2
+require github.com/lcylpzls/logx v1.3.3
+
+require github.com/lcylpzls/errx v1.5.5 // indirect

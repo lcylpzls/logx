@@ -6,3 +6,4 @@ github.com/lcylpzls/logx v1.3.1/go.mod h1:eX8QMpxjv2igvhDPeHyCaFOp1wfNTpJVTmAQbn
 github.com/lcylpzls/logx v1.3.2/go.mod h1:EVpYAd/8ueoQJVdkcw4UHq7aKtlBr6Nj9P5x44JuMlM=
 github.com/lcylpzls/testx v1.2.1/go.mod h1:RQM/Rpxw2CfbZHXrChB9Mq+kMryQ+fQy10jHd9CeQTc=
 github.com/lcylpzls/testx v1.4.2/go.mod h1:LtRgi54rpw6k5Pomw2iczOfGsRXBroKGml1VeiZUZbI=
+github.com/lcylpzls/testx v1.4.4/go.mod h1:6X4rYVZN0CYdG/L//Qf92f5nixcp1NdyCR7iCbItas4=

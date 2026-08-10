@@ -3,8 +3,8 @@ module github.com/lcylpzls/logx/examples/bench_compare
 go 1.26.5
 
 require (
-	github.com/lcylpzls/logx v1.3.1
-	github.com/lcylpzls/testx v1.4.2
+	github.com/lcylpzls/logx v1.3.2
+	github.com/lcylpzls/testx v1.4.3
 	github.com/sirupsen/logrus v1.9.4
 	go.uber.org/zap v1.28.0
 )

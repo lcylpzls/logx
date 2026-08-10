@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/lcylpzls/errx"
 )
 
 // ---------------------------------------------------------------------------
@@ -353,17 +355,17 @@ func (b *Builder) Build() (Logger, error) {
 		case fileAppenderType:
 			fileApp, err := newFileAppender(cfg.fileCfg, b.metrics)
 			if err != nil {
-				return nil, fmt.Errorf("logx：创建文件输出器失败：%w", err)
+				return nil, errx.WrapCode(err, CodeIOFailed, "logx：创建文件输出器失败")
 			}
 			fa := fileApp.(*fileAppender)
 			app = fa
 		case writerAppenderType:
 			if cfg.writer == nil {
-				return nil, fmt.Errorf("logx：writer 通道未提供 io.Writer")
+				return nil, errx.NewCode(CodeInvalidConfig, "logx：writer 通道未提供 io.Writer")
 			}
 			app = newWriterAppender(cfg.writer)
 		default:
-			return nil, fmt.Errorf("logx：未知的输出通道类型：%s", cfg.appType)
+			return nil, errx.NewCodef(CodeInvalidConfig, "logx：未知的输出通道类型：%s", cfg.appType)
 		}
 
 		enc := cfg.enc
@@ -544,7 +546,7 @@ func (l *logger) Metrics() Metrics {
 func (l *logger) Sync() error {
 	for _, c := range l.cores {
 		if err := c.sync(); err != nil {
-			return fmt.Errorf("logx：同步刷盘失败：%w", err)
+			return errx.WrapCode(err, CodeIOFailed, "logx：同步刷盘失败")
 		}
 	}
 	return nil
@@ -553,7 +555,7 @@ func (l *logger) Sync() error {
 func (l *logger) Close() error {
 	for _, c := range l.cores {
 		if err := c.close(); err != nil {
-			return fmt.Errorf("logx：关闭失败：%w", err)
+			return errx.WrapCode(err, CodeIOFailed, "logx：关闭失败")
 		}
 	}
 	return nil

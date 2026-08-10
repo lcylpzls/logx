@@ -5,6 +5,8 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+
+	"github.com/lcylpzls/errx"
 )
 
 // core 是日志处理的核心引擎，串联 Encoder 和 Appender，
@@ -38,7 +40,7 @@ func (c *core) write(e *Entry) {
 	defer putBuffer(buf)
 
 	if err := c.enc.Encode(buf, e); err != nil {
-		c.reportError(fmt.Errorf("编码失败：%w", err))
+		c.reportError(errx.WrapCode(err, CodeIOFailed, "编码失败"))
 		return
 	}
 
@@ -47,7 +49,7 @@ func (c *core) write(e *Entry) {
 	c.mu.Unlock()
 
 	if err != nil {
-		c.reportError(fmt.Errorf("写入失败：%w", err))
+		c.reportError(errx.WrapCode(err, CodeIOFailed, "写入失败"))
 	}
 }
 

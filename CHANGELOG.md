@@ -2,6 +2,16 @@
 
 本项目遵循语义化版本（SemVer）。值得记录的变更统一维护在此文件。
 
+## [v1.3.0] - 2026-08-10
+
+### 变更
+
+- 错误统一 errx 化：新增 CodeInvalidConfig / CodeIOFailed / CodeClosed，Builder、文件输出器与内部错误上报全部走 errx 结构化错误；errx 升级为直接生产依赖。
+
+### 质量
+
+- race / vet / staticcheck / govulncheck 全绿；覆盖率维持基线。
+
 ## [v1.2.5] - 2026-08-10
 
 ### 变更

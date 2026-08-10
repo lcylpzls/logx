@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lcylpzls/errx"
 )
 
 // defaultSlotSize 是异步写入槽位的默认容量。
@@ -72,13 +74,13 @@ var platformIsWindows = runtime.GOOS == "windows"
 // cfg 必须至少设置 LogDir 和 Filename。
 func newFileAppender(cfg *FileConfig, sinks ...MetricSink) (Appender, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("logx：FileConfig 不能为 nil")
+		return nil, errx.NewCode(CodeInvalidConfig, "logx：FileConfig 不能为 nil")
 	}
 	if cfg.LogDir == "" {
-		return nil, fmt.Errorf("logx：日志目录不能为空")
+		return nil, errx.NewCode(CodeInvalidConfig, "logx：日志目录不能为空")
 	}
 	if cfg.Filename == "" {
-		return nil, fmt.Errorf("logx：日志文件名不能为空")
+		return nil, errx.NewCode(CodeInvalidConfig, "logx：日志文件名不能为空")
 	}
 	if cfg.MaxSize <= 0 {
 		cfg.MaxSize = 100
@@ -99,10 +101,10 @@ func newFileAppender(cfg *FileConfig, sinks ...MetricSink) (Appender, error) {
 	// 确保目录存在
 	absDir, err := absPathFn(cfg.LogDir)
 	if err != nil {
-		return nil, fmt.Errorf("logx：解析日志目录路径失败：%w", err)
+		return nil, errx.WrapCode(err, CodeIOFailed, "logx：解析日志目录路径失败")
 	}
 	if err := os.MkdirAll(absDir, 0755); err != nil {
-		return nil, fmt.Errorf("logx：日志目录创建失败：%w", err)
+		return nil, errx.WrapCode(err, CodeIOFailed, "logx：日志目录创建失败")
 	}
 
 	// 分离文件名和后缀
@@ -126,7 +128,7 @@ func newFileAppender(cfg *FileConfig, sinks ...MetricSink) (Appender, error) {
 
 	// 打开初始物理文件
 	if err := fa.openNewFile(); err != nil {
-		return nil, fmt.Errorf("logx：创建日志文件失败：%w", err)
+		return nil, errx.WrapCode(err, CodeIOFailed, "logx：创建日志文件失败")
 	}
 
 	// 创建统一的 context 用于控制所有后台协程
@@ -158,7 +160,7 @@ func newFileAppender(cfg *FileConfig, sinks ...MetricSink) (Appender, error) {
 // Append 写入日志数据。
 func (fa *fileAppender) Append(level Level, p []byte) (n int, err error) {
 	if atomic.LoadInt32(&fa.closed) == 1 {
-		return 0, fmt.Errorf("logx：文件输出器已关闭")
+		return 0, errx.NewCode(CodeClosed, "logx：文件输出器已关闭")
 	}
 
 	if fa.cfg.WriteMode == AsyncWriteMode {
@@ -269,7 +271,7 @@ func (fa *fileAppender) runFlushLoop() {
 
 		fa.mu.Lock()
 		if err := fa.checkRotation(buf.Len()); err != nil {
-			fa.reportError(fmt.Errorf("异步刷盘轮转失败：%w", err))
+			fa.reportError(errx.WrapCode(err, CodeIOFailed, "异步刷盘轮转失败"))
 			buf.Reset()
 			fa.mu.Unlock()
 			return
@@ -281,7 +283,7 @@ func (fa *fileAppender) runFlushLoop() {
 			fa.writeBytes.Add(uint64(n))
 			fa.emitWrite(n)
 		} else {
-			fa.reportError(fmt.Errorf("异步刷盘写入失败：%w", err))
+			fa.reportError(errx.WrapCode(err, CodeIOFailed, "异步刷盘写入失败"))
 		}
 		buf.Reset()
 		fa.mu.Unlock()
@@ -329,7 +331,7 @@ func (fa *fileAppender) drainAsync() {
 		case data := <-fa.writeCh:
 			fa.mu.Lock()
 			if err := fa.checkRotation(len(data)); err != nil {
-				fa.reportError(fmt.Errorf("关闭排空轮转失败：%w", err))
+				fa.reportError(errx.WrapCode(err, CodeIOFailed, "关闭排空轮转失败"))
 				fa.recycleSlot(data)
 				fa.mu.Unlock()
 				continue
@@ -341,7 +343,7 @@ func (fa *fileAppender) drainAsync() {
 				fa.writeBytes.Add(uint64(n))
 				fa.emitWrite(n)
 			} else {
-				fa.reportError(fmt.Errorf("关闭排空写入失败：%w", err))
+				fa.reportError(errx.WrapCode(err, CodeIOFailed, "关闭排空写入失败"))
 			}
 			fa.recycleSlot(data)
 			fa.mu.Unlock()
@@ -407,7 +409,7 @@ func (fa *fileAppender) openNewFile() error {
 
 	f, err := openNewFileFn(physicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("logx：无法创建物理日志文件 %s：%w", physicalPath, err)
+		return errx.WrapCode(err, CodeIOFailed, fmt.Sprintf("logx：无法创建物理日志文件 %s", physicalPath))
 	}
 
 	// 关闭旧文件
@@ -420,7 +422,7 @@ func (fa *fileAppender) openNewFile() error {
 	// 获取当前文件大小
 	info, err := fileStatFn(f)
 	if err != nil {
-		return fmt.Errorf("logx：获取文件状态失败：%w", err)
+		return errx.WrapCode(err, CodeIOFailed, "logx：获取文件状态失败")
 	}
 	fa.currentSize = info.Size()
 
@@ -503,7 +505,7 @@ func (fa *fileAppender) createSymlink(physicalPath string) {
 
 	// 创建新软链接
 	if err := createSymlinkFn(filepath.Base(physicalPath), fa.symlinkPath); err != nil {
-		fa.reportError(fmt.Errorf("创建软链接失败：%w", err))
+		fa.reportError(errx.WrapCode(err, CodeIOFailed, "创建软链接失败"))
 	}
 }
 
@@ -575,7 +577,7 @@ func (fa *fileAppender) cleanup() {
 			}
 			if info.ModTime().Before(cutoff) {
 				if rmErr := os.Remove(path); rmErr != nil {
-					fa.reportError(fmt.Errorf("按 MaxAge 清理日志文件失败 %s：%w", path, rmErr))
+					fa.reportError(errx.WrapCode(rmErr, CodeIOFailed, fmt.Sprintf("按 MaxAge 清理日志文件失败 %s", path)))
 				}
 			}
 		}
@@ -597,7 +599,7 @@ func (fa *fileAppender) cleanup() {
 				break
 			}
 			if rmErr := os.Remove(path); rmErr != nil {
-				fa.reportError(fmt.Errorf("按 MaxBackups 清理日志文件失败 %s：%w", path, rmErr))
+				fa.reportError(errx.WrapCode(rmErr, CodeIOFailed, fmt.Sprintf("按 MaxBackups 清理日志文件失败 %s", path)))
 			}
 			deleted++
 		}
@@ -629,7 +631,7 @@ func (fa *fileAppender) cleanup() {
 func (fa *fileAppender) scanMatches(globPattern string) []string {
 	matches, err := filepath.Glob(globPattern)
 	if err != nil {
-		fa.reportError(fmt.Errorf("扫描日志文件失败：%w", err))
+		fa.reportError(errx.WrapCode(err, CodeIOFailed, "扫描日志文件失败"))
 		return nil
 	}
 	return matches
@@ -642,14 +644,14 @@ func (fa *fileAppender) compressFile(path string) {
 	// 打开源文件
 	src, err := openSrcFileFn(path)
 	if err != nil {
-		fa.reportError(fmt.Errorf("压缩-打开源文件失败 %s：%w", path, err))
+		fa.reportError(errx.WrapCode(err, CodeIOFailed, fmt.Sprintf("压缩-打开源文件失败 %s", path)))
 		return
 	}
 
 	// 创建目标 .gz 文件
 	dst, err := createDstFileFn(gzPath)
 	if err != nil {
-		fa.reportError(fmt.Errorf("压缩-创建目标文件失败 %s：%w", gzPath, err))
+		fa.reportError(errx.WrapCode(err, CodeIOFailed, fmt.Sprintf("压缩-创建目标文件失败 %s", gzPath)))
 		return
 	}
 
@@ -658,30 +660,30 @@ func (fa *fileAppender) compressFile(path string) {
 		closeGzipFn(gw)
 		closeFileFn(dst)
 		removePathFn(gzPath)
-		fa.reportError(fmt.Errorf("压缩-写入失败 %s：%w", path, err))
+		fa.reportError(errx.WrapCode(err, CodeIOFailed, fmt.Sprintf("压缩-写入失败 %s", path)))
 		return
 	}
 
 	if err := closeGzipFn(gw); err != nil {
 		closeFileFn(dst)
 		removePathFn(gzPath)
-		fa.reportError(fmt.Errorf("压缩-关闭gzip失败 %s：%w", path, err))
+		fa.reportError(errx.WrapCode(err, CodeIOFailed, fmt.Sprintf("压缩-关闭gzip失败 %s", path)))
 		return
 	}
 	if err := closeFileFn(dst); err != nil {
 		removePathFn(gzPath)
-		fa.reportError(fmt.Errorf("压缩-关闭文件失败 %s：%w", path, err))
+		fa.reportError(errx.WrapCode(err, CodeIOFailed, fmt.Sprintf("压缩-关闭文件失败 %s", path)))
 		return
 	}
 
 	// 压缩成功后先关闭源文件再删除（Windows 下打开的文件无法删除）
 	if err := closeFileFn(src); err != nil {
 		removePathFn(gzPath)
-		fa.reportError(fmt.Errorf("压缩-关闭源文件失败 %s：%w", path, err))
+		fa.reportError(errx.WrapCode(err, CodeIOFailed, fmt.Sprintf("压缩-关闭源文件失败 %s", path)))
 		return
 	}
 	if rmErr := removePathFn(path); rmErr != nil {
-		fa.reportError(fmt.Errorf("压缩后删除源文件失败 %s：%w", path, rmErr))
+		fa.reportError(errx.WrapCode(rmErr, CodeIOFailed, fmt.Sprintf("压缩后删除源文件失败 %s", path)))
 		return
 	}
 	fa.compressions.Add(1)

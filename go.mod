@@ -1,6 +1,6 @@
 module github.com/lcylpzls/logx
 
-go 1.21.0
+go 1.26.5
 
 require github.com/lcylpzls/testx v1.2.3
 

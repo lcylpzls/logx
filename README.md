@@ -1,6 +1,6 @@
 # logx
 
-[![Go Version](https://img.shields.io/badge/Go-%3E%3D1.21-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-%3E%3D1.26.5-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](go.mod)
 

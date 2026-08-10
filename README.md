@@ -8,6 +8,9 @@
 
 logx 兼具 [Zap](https://github.com/uber-go/zap) 的极致性能与 [Logrus](https://github.com/sirupsen/logrus) 的易用性，通过链式 Builder API 实现业务与底层日志逻辑的完美解耦。纯标准库实现，不引入任何第三方依赖。
 
+> 指标统一外置：`NewBuilder().WithMetrics(metricsx 实例)` 即可把
+> 日志记录/文件写入/轮转/压缩/清理事件转发到家族 metricsx 底座。
+
 ---
 
 ## 快速开始

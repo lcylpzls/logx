@@ -32,6 +32,7 @@ type Builder struct {
 	enc        Encoder // 后续通道使用的编码器（nil=默认纯文本）
 	sampler    *sampler
 	redacted   map[string]struct{}
+	metrics    MetricSink
 }
 
 // coreConfig 描述一个输出通道的配置。
@@ -96,6 +97,13 @@ func (b *Builder) WithRedact(keys ...string) *Builder {
 		}
 		b.redacted[k] = struct{}{}
 	}
+	return b
+}
+
+// WithMetrics 注入外部指标接收器（metricsx 或其他实现）。
+// 传 nil 表示关闭外部转发，仅保留内部快照统计。
+func (b *Builder) WithMetrics(m MetricSink) *Builder {
+	b.metrics = m
 	return b
 }
 
@@ -328,6 +336,7 @@ func (b *Builder) Build() (Logger, error) {
 		callerSkip: b.callerSkip,
 		sampler:    b.sampler,
 		redacted:   b.redacted,
+		metrics:    b.metrics,
 	}
 
 	for i := range b.cores {
@@ -342,10 +351,11 @@ func (b *Builder) Build() (Logger, error) {
 		case consoleAppenderType:
 			app = newConsoleAppender()
 		case fileAppenderType:
-			fa, err := newFileAppender(cfg.fileCfg)
+			fileApp, err := newFileAppender(cfg.fileCfg, b.metrics)
 			if err != nil {
 				return nil, fmt.Errorf("logx：创建文件输出器失败：%w", err)
 			}
+			fa := fileApp.(*fileAppender)
 			app = fa
 		case writerAppenderType:
 			if cfg.writer == nil {
@@ -381,6 +391,7 @@ type logger struct {
 	sampler    *sampler
 	redacted   map[string]struct{}
 	callerSkip int // 0=不追踪，>0=runtime.Caller 跳过值
+	metrics    MetricSink
 }
 
 // IsDebugEnabled 判断是否有任何 core 启用了 Debug 级别。
@@ -464,6 +475,7 @@ func (l *logger) WithContext(ctx context.Context) Logger {
 		sampler:    l.sampler,
 		redacted:   l.redacted,
 		callerSkip: l.callerSkip,
+		metrics:    l.metrics,
 	}
 }
 
@@ -475,6 +487,7 @@ func (l *logger) WithField(key string, val any) Logger {
 		sampler:    l.sampler,
 		redacted:   l.redacted,
 		callerSkip: l.callerSkip,
+		metrics:    l.metrics,
 	}
 	nl.fields = l.fields
 	nl.fields.appendField(Field{Key: key, Value: val})
@@ -613,6 +626,11 @@ func (l *logger) log(level Level, msg string, fields FieldGroup) {
 
 	for _, c := range l.cores {
 		c.write(e)
+	}
+
+	// 外部指标：记录一条已接受日志（采样丢弃不计数）。
+	if l.metrics != nil {
+		l.metrics.IncCounter("logx.records", strings.ToLower(strings.TrimSpace(level.String())))
 	}
 
 	// 触发 Hook（异步，不阻塞日志主路径）

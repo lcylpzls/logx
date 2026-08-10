@@ -59,6 +59,7 @@ type fileAppender struct {
 	rotations    atomic.Uint64 // 文件轮转次数
 	compressions atomic.Uint64 // gzip 压缩成功次数
 	cleanups     atomic.Uint64 // 生命周期清理执行次数
+	metricsSink  MetricSink    // 外部指标接收器（可为 nil）
 }
 
 // lifecycleCheckInterval 生命周期后台扫描间隔（测试注入用）。
@@ -69,7 +70,7 @@ var platformIsWindows = runtime.GOOS == "windows"
 
 // newFileAppender 创建一个新的文件输出器。
 // cfg 必须至少设置 LogDir 和 Filename。
-func newFileAppender(cfg *FileConfig) (Appender, error) {
+func newFileAppender(cfg *FileConfig, sinks ...MetricSink) (Appender, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("logx：FileConfig 不能为 nil")
 	}
@@ -118,6 +119,9 @@ func newFileAppender(cfg *FileConfig) (Appender, error) {
 		ext:           ext,
 		symlinkPath:   filepath.Join(absDir, cfg.Filename),
 		errorHandler:  cfg.ErrorHandler,
+	}
+	if len(sinks) > 0 {
+		fa.metricsSink = sinks[0]
 	}
 
 	// 打开初始物理文件
@@ -227,6 +231,7 @@ func (fa *fileAppender) appendSync(p []byte) (int, error) {
 		fa.currentSize += int64(n)
 		fa.written.Add(1)
 		fa.writeBytes.Add(uint64(n))
+		fa.emitWrite(n)
 	}
 	return n, err
 }
@@ -274,6 +279,7 @@ func (fa *fileAppender) runFlushLoop() {
 			fa.currentSize += int64(n)
 			fa.written.Add(1)
 			fa.writeBytes.Add(uint64(n))
+			fa.emitWrite(n)
 		} else {
 			fa.reportError(fmt.Errorf("异步刷盘写入失败：%w", err))
 		}
@@ -333,6 +339,7 @@ func (fa *fileAppender) drainAsync() {
 				fa.currentSize += int64(n)
 				fa.written.Add(1)
 				fa.writeBytes.Add(uint64(n))
+				fa.emitWrite(n)
 			} else {
 				fa.reportError(fmt.Errorf("关闭排空写入失败：%w", err))
 			}
@@ -364,6 +371,7 @@ func (fa *fileAppender) syncAsync() error {
 			}
 			fa.written.Add(1)
 			fa.writeBytes.Add(uint64(n))
+			fa.emitWrite(n)
 		default:
 			if fa.file != nil {
 				return fa.file.Sync()
@@ -445,6 +453,7 @@ func (fa *fileAppender) checkRotation(dataLen int) error {
 
 	if needRotate {
 		fa.rotations.Add(1)
+		fa.emitCounter("logx.rotations")
 		return fa.openNewFile()
 	}
 
@@ -531,6 +540,7 @@ func (fa *fileAppender) runLifecycle() {
 // cleanup 执行一次完整的清理周期：删除过期文件 + 压缩旧文件。
 func (fa *fileAppender) cleanup() {
 	fa.cleanups.Add(1)
+	fa.emitCounter("logx.cleanups")
 
 	pattern := fmt.Sprintf("%s-*%s", fa.basenameNoExt, fa.ext)
 	globPattern := filepath.Join(fa.dir, pattern)
@@ -675,6 +685,25 @@ func (fa *fileAppender) compressFile(path string) {
 		return
 	}
 	fa.compressions.Add(1)
+	fa.emitCounter("logx.compressions")
+}
+
+// emitWrite 转发一次成功写入与字节量。
+func (fa *fileAppender) emitWrite(n int) {
+	if fa.metricsSink == nil {
+		return
+	}
+	fa.metricsSink.IncCounter("logx.writes")
+	if cs, ok := fa.metricsSink.(CounterSink); ok {
+		cs.AddCounter("logx.write_bytes", float64(n))
+	}
+}
+
+// emitCounter 转发一次生命周期事件。
+func (fa *fileAppender) emitCounter(name string) {
+	if fa.metricsSink != nil {
+		fa.metricsSink.IncCounter(name)
+	}
 }
 
 // reportError 将内部错误统一交给错误处理器；未配置时降级输出到 stderr。

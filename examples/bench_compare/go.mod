@@ -1,9 +1,10 @@
 module github.com/lcylpzls/logx/examples/bench_compare
 
-go 1.21
+go 1.21.0
+
 require (
 	github.com/lcylpzls/logx v1.0.0
-	github.com/lcylpzls/testx v1.2.0
+	github.com/lcylpzls/testx v1.2.3
 	github.com/sirupsen/logrus v1.9.4
 	go.uber.org/zap v1.28.0
 )

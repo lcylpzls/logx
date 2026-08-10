@@ -1,4 +1,4 @@
-package logx
+package core
 
 // maxInlineFields 是 FieldGroup 内联数组容量。
 // 不超过该数量的字段在热路径上零堆分配。

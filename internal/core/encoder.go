@@ -1,4 +1,4 @@
-package logx
+package core
 
 // Encoder 编码器接口，负责将 Entry 编码写入 Buffer。
 // 内置实现：TextEncoder（纯文本）、JSONEncoder（结构化 JSON，后续版本）。

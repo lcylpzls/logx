@@ -1,5 +1,5 @@
 // Package logx 是工业级零依赖高性能 Go 结构化日志库。
-package logx
+package core
 
 // Level 表示日志级别。数值越大，严重程度越高。
 type Level uint32

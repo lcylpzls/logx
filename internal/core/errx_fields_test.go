@@ -1,4 +1,4 @@
-package logx
+package core
 
 import (
 	"testing"
@@ -17,6 +17,7 @@ func fieldsMap(g FieldGroup) map[string]Field {
 }
 
 func TestFieldsFromError(t *testing.T) {
+	errx.RegisterCode(errx.Code("demo_failed"), "演示错误")
 	err := errx.New(errx.KindBusiness, errx.Code("demo_failed"), "下单失败").WithField("order_id", "123")
 	g := FieldsFromError(err)
 	m := fieldsMap(g)
@@ -32,6 +33,9 @@ func TestFieldsFromError(t *testing.T) {
 	}
 	if got := m["err.message"].str; got != "下单失败" {
 		t.Fatalf("err.message = %q，期望 下单失败", got)
+	}
+	if got := m["err.code_desc"].str; got != "演示错误" {
+		t.Fatalf("err.code_desc = %q，期望 演示错误", got)
 	}
 	if got := m["order_id"].Value; got != "123" {
 		t.Fatalf("order_id = %v，期望 123", got)

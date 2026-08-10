@@ -1,4 +1,4 @@
-package logx
+package core
 
 // Appender 输出器接口，负责将字节流落地到目标介质。
 // 内置实现：ConsoleAppender（控制台）、FileAppender（文件）。

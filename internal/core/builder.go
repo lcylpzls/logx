@@ -1,4 +1,4 @@
-package logx
+package core
 
 import (
 	"context"
@@ -691,12 +691,17 @@ func (l *logger) redactFields(fields FieldGroup) FieldGroup {
 // isLogxInternal 判断函数是否属于 logx 库内部（logger 方法、core.write 等）。
 // 通过函数名而非文件路径判断，不受目录名和 inlining 影响。
 func isLogxInternal(fn string) bool {
-	// 匹配 github.com/lcylpzls/logx 包内的非测试函数
-	// 测试函数（如 TestXxx）虽然也在 logx 包，但属于用户代码
-	return strings.Contains(fn, "github.com/lcylpzls/logx.") &&
-		!strings.Contains(fn, "github.com/lcylpzls/logx.Test") &&
-		!strings.Contains(fn, "github.com/lcylpzls/logx.Benchmark") &&
-		!strings.Contains(fn, "github.com/lcylpzls/logx.Example")
+	// 匹配 github.com/lcylpzls/logx 与 github.com/lcylpzls/logx/internal/core
+	// 包内的非测试函数；测试函数（如 TestXxx）虽然也在库内，但属于用户代码。
+	if !strings.Contains(fn, "github.com/lcylpzls/logx") {
+		return false
+	}
+	for _, prefix := range []string{".Test", ".Benchmark", ".Example"} {
+		if strings.Contains(fn, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 // isRuntimeFrame 判断是否属于 Go runtime 栈帧。

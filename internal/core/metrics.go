@@ -1,4 +1,4 @@
-package logx
+package core
 
 // MetricSink 是外部指标接收器接口，metricsx 等家族底座天然满足。
 // 未注入时仅保留内部快照统计，不产生外部开销。

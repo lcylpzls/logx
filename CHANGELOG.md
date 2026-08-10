@@ -2,6 +2,12 @@
 
 本项目遵循语义化版本（SemVer）。值得记录的变更统一维护在此文件。
 
+## [v1.4.0] - 2026-08-11
+
+### 新增
+
+- `FieldsFromError(err)`：将 errx 结构化错误转换为日志字段组（err.code/err.kind/err.retryable/err.message 与 KV 字段），替代即将移除的 errx/logx 适配子包。
+
 ## [v1.3.4] - 2026-08-10
 
 ### 变更

@@ -3,12 +3,13 @@
 ## 1. 版本策略
 
 - 遵循语义化版本（SemVer）：`vMAJOR.MINOR.PATCH`；
-- **v1.0.0 起冻结 API**：破坏性变更必须提升主版本（v2.0.0），升级前查看 CHANGELOG；
-- v1.0.0（2026-08-08）为 API 冻结基线，导出符号见 `api-v1.0.0.md`；后续可用 `golang.org/x/exp/cmd/apidiff` 对比版本检测破坏。
+- 家族约定：v1 之后破坏性变更统一走 minor 版本（不强制主版本升级），
+  直至另行调整版本规范；
+- 升级前查看 CHANGELOG。
 
 ## 2. 发布流程
 
-```bash
+```powershell
 # 1) 确保 main 分支 CI 全绿
 git push origin main
 
@@ -17,9 +18,9 @@ git push origin main
 # 3) 提交定版
 git add CHANGELOG.md && git commit -m "chore(release): 定版 vX.Y.Z"
 
-# 4) 使用发版脚本（自动 push main + 打 tag + push tag）
-./git_push.ps1        # Windows / PowerShell
-./git_push.sh         # Linux / macOS / Git Bash
+# 4) 打 tag 并推送
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 tag 推送后，`.github/workflows/release.yml` 自动执行：
@@ -43,6 +44,9 @@ tag 推送后，`.github/workflows/release.yml` 自动执行：
 
 | 版本 | 说明 |
 | --- | --- |
+| v1.5.1 | 文档同步与历史清理（纯文档/版本元数据变更） |
+| v1.5.0 | 主体下沉 internal/core、根包薄转发；依赖升级 errx v1.6.0 |
+| v1.4.x | 家族依赖对齐与指标外置 |
 | v1.0.0 | API 冻结：移除失效的 `WithOnDropped` / `Metrics.Drops`，工业化基线 |
 | v0.12.0 | 工业化基线（历史）：全链路零分配、Field 强类型化、有界背压、CI 三平台验证 |
 | v0.11.0 / v0.10.0 | 早期版本（旧 API，CI 未验证通过） |

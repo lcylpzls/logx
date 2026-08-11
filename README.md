@@ -17,7 +17,7 @@ logx 兼具 [Zap](https://github.com/uber-go/zap) 的极致性能与 [Logrus](ht
 
 ### 安装
 
-```bash
+```powershell
 go get github.com/lcylpzls/logx
 ```
 
@@ -427,7 +427,7 @@ logx/
 
 在 `examples/bench_compare` 中与 Zap / Logrus 对比（同环境、同消息、同 3 字段、纯文本输出到 `io.Discard`）：
 
-```bash
+```powershell
 cd examples/bench_compare
 go test -bench=. -benchmem ./...
 ```
@@ -444,7 +444,7 @@ go test -bench=. -benchmem ./...
 
 质量门禁命令：
 
-```bash
+```powershell
 go vet ./...                              # 静态检查，必须零告警
 staticcheck ./...                         # 深度静态检查，必须零告警
 go test -race -coverprofile=coverage.out ./...  # 测试 + 竞态 + 覆盖率
@@ -452,8 +452,10 @@ go tool cover -func coverage.out          # 覆盖率目标 100%
 go test -bench=. -benchmem ./...          # 微基准
 ```
 
-- **API 兼容性**：发布前建议使用 `apidiff`（`go install golang.org/x/exp/cmd/apidiff@latest`）对比上一版本；破坏性变更必须提升主版本号；
-- **发布流程**：推送形如 `v0.10.0` 的 tag（可用 `git_push.ps1` 或 `git_push.sh`），GitHub Actions 自动测试并生成 Release；
+- **API 兼容性**：家族约定破坏性变更统一走 minor 版本（不强制主版本升级），
+  直至另行调整版本规范；
+- **发布流程**：推送形如 `v1.5.1` 的 tag（使用 PowerShell 执行 `git push origin v1.5.1`），
+  GitHub Actions 自动测试并生成 Release；
 - **本地开发**：仓库提供 `go.work`，可在根目录直接联调所有 examples。
 
 ---

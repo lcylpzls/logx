@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // ---------------------------------------------------------------------------
@@ -1856,6 +1857,10 @@ func FuzzJSONEncoder_Encode(f *testing.F) {
 
 	enc := NewJSONEncoder()
 	f.Fuzz(func(t *testing.T, msg, field string) {
+		// JSON 对非法 UTF-8 会替换为 U+FFFD，无法无损往返，跳过此类输入。
+		if !utf8.ValidString(msg) || !utf8.ValidString(field) {
+			return
+		}
 		buf := getBuffer()
 		defer putBuffer(buf)
 		if err := enc.Encode(buf, &Entry{

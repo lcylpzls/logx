@@ -454,7 +454,7 @@ go test -bench=. -benchmem ./...          # 微基准
 
 - **API 兼容性**：家族约定破坏性变更统一走 minor 版本（不强制主版本升级），
   直至另行调整版本规范；
-- **发布流程**：推送形如 `v1.5.1` 的 tag（使用 PowerShell 执行 `git push origin v1.5.1`），
+- **发布流程**：推送形如 `v1.5.2` 的 tag（使用 PowerShell 执行 `git push origin v1.5.2`），
   GitHub Actions 自动测试并生成 Release；
 - **本地开发**：仓库提供 `go.work`，可在根目录直接联调所有 examples。
 

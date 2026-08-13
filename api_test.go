@@ -51,6 +51,9 @@ func TestPublicAPI(t *testing.T) {
 	if logx.NewJSONEncoder() == nil {
 		t.Fatal("NewJSONEncoder 返回 nil")
 	}
+	if logx.NewNopLogger() == nil {
+		t.Fatal("NewNopLogger 返回 nil")
+	}
 
 	_ = logx.DebugLevel
 	_ = logx.InfoLevel

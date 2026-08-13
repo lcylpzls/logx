@@ -53,6 +53,10 @@ const (
 
 func NewBuilder() *Builder { return core.NewBuilder() }
 
+// NewNopLogger 返回一个不产生任何输出与副作用的 Logger。
+// Panic/Fatal 静默；SafeExit 保留退出回调语义。
+func NewNopLogger() Logger { return core.NewNopLogger() }
+
 func WithColor() ConsoleOption { return core.WithColor() }
 
 func WithLogDir(dir string) FileOption        { return core.WithLogDir(dir) }

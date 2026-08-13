@@ -44,6 +44,7 @@ tag 推送后，`.github/workflows/release.yml` 自动执行：
 
 | 版本 | 说明 |
 | --- | --- |
+| v1.5.2 | 新增 NewNopLogger（no-op Logger） |
 | v1.5.1 | 文档同步与历史清理（纯文档/版本元数据变更） |
 | v1.5.0 | 主体下沉 internal/core、根包薄转发；依赖升级 errx v1.6.0 |
 | v1.4.x | 家族依赖对齐与指标外置 |

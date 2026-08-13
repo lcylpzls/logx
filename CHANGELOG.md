@@ -2,6 +2,24 @@
 
 本项目遵循语义化版本（SemVer）。值得记录的变更统一维护在此文件。
 
+## [v1.5.2] - 2026-08-13
+
+### 新增
+
+- `logx.NewNopLogger()`：返回不产生任何输出与副作用的 no-op Logger，
+  供下游库把“nil 表示不记录”归一为恒非 nil 的占位日志器；
+  - `Debug/Info/Warn/Error/Panic/Fatal` 及格式化变体全部静默
+    （不输出、不 panic、不退出进程）；
+  - `IsDebugEnabled()` 返回 false，`WithContext/WithField` 返回
+    新的 no-op 实例，`Sync/Close` 返回 nil；
+  - `SafeExit(f)` 保留退出回调语义（无可刷内容，直接执行 f）。
+
+### 质量
+
+- 根包与 internal/core 覆盖率保持 100%；race / vet / staticcheck 全绿。
+- FuzzJSONEncoder_Encode 对非 UTF-8 输入跳过断言（JSON 会以 U+FFFD
+  替换非法 UTF-8，无法无损往返；此为 fuzz 目标修正，非编码器缺陷）。
+
 ## [v1.5.1] - 2026-08-11
 
 ### 文档
